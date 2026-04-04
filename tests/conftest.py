@@ -22,15 +22,25 @@ async def client(session):
     finally:
         fastapi_app.dependency_overrides.pop(get_session, None)
 
-@pytest.fixture
-def session(monkeypatch):
+@pytest.fixture(autouse=True)
+def setup_test_env(monkeypatch):
     with tempfile.TemporaryDirectory() as temp_dir:
-        db_path = Path(temp_dir) / "test.db"
-        sqlite_url = f"sqlite:///{db_path}"
-        engine = create_engine(sqlite_url, connect_args={"check_same_thread": False})
-        SQLModel.metadata.create_all(engine)
-        
-        monkeypatch.setattr(app_db, "engine", engine)
-        
-        with Session(engine) as session:
-            yield session
+        input_dir = Path(temp_dir) / "input"
+        input_dir.mkdir()
+        monkeypatch.setattr("app.routes.upload.settings.input_dir", str(input_dir))
+        # Might also need to patch app.config.settings just in case
+        monkeypatch.setattr("app.config.settings.input_dir", str(input_dir))
+        yield temp_dir
+
+@pytest.fixture
+def session(monkeypatch, setup_test_env):
+    temp_dir = setup_test_env
+    db_path = Path(temp_dir) / "test.db"
+    sqlite_url = f"sqlite:///{db_path}"
+    engine = create_engine(sqlite_url, connect_args={"check_same_thread": False})
+    SQLModel.metadata.create_all(engine)
+    
+    monkeypatch.setattr(app_db, "engine", engine)
+    
+    with Session(engine) as session:
+        yield session

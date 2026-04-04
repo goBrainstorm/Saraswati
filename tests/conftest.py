@@ -16,9 +16,11 @@ async def client(session):
 
     fastapi_app.dependency_overrides[get_session] = override_get_session
     transport = ASGITransport(app=fastapi_app)
-    async with AsyncClient(transport=transport, base_url="http://test") as ac:
-        yield ac
-    fastapi_app.dependency_overrides.clear()
+    try:
+        async with AsyncClient(transport=transport, base_url="http://test") as ac:
+            yield ac
+    finally:
+        fastapi_app.dependency_overrides.pop(get_session, None)
 
 @pytest.fixture
 def session(monkeypatch):
@@ -32,8 +34,3 @@ def session(monkeypatch):
         
         with Session(engine) as session:
             yield session
-
-@pytest.mark.asyncio
-async def test_test_client_and_db(client: AsyncClient, session):
-    response = await client.get("/api/status")
-    assert response.status_code == 200

@@ -8,6 +8,78 @@ See **[ROADMAP.md](ROADMAP.md)** for the full architecture and implementation pl
 
 ---
 
+## Setup & Usage
+
+### 1. Install dependencies
+
+```bash
+python -m venv .venv
+source .venv/bin/activate   # bash/zsh
+# or: source .venv/bin/activate.fish
+pip install -r requirements.txt
+```
+
+### 2. Configure
+
+```bash
+cp .env.example .env
+```
+
+Edit `.env` as needed. The only required change for local use is confirming `HOST` and `PORT`. Nextcloud credentials are optional — leave them blank and audio files will accumulate locally without being archived.
+
+Key settings:
+
+| Variable | Default | Description |
+|---|---|---|
+| `HOST` | `127.0.0.1` | Bind address |
+| `PORT` | `8000` | Bind port |
+| `LOCAL_RETENTION_DAYS` | `7` | Days before local files are eligible for cleanup |
+| `SCHEDULE_CRON` | `0 3 * * *` | When the pipeline job runs (daily at 03:00) |
+| `NEXTCLOUD_URL` | _(empty)_ | Leave blank to disable Nextcloud archiving |
+
+### 3. Start the server
+
+```bash
+# Development (auto-reload on code changes)
+uvicorn main:app --reload
+
+# Production
+python main.py
+```
+
+The web UI is available at `http://localhost:8000`.
+
+### 4. Upload audio
+
+Open the web UI and use the upload form, or send a file directly via the API:
+
+```bash
+curl -X POST http://localhost:8000/api/upload \
+  -F "file=@recording.m4a"
+```
+
+Duplicate files (same SHA-256 content) return HTTP 409 with the existing record.
+
+### 5. Check file status
+
+Open `http://localhost:8000` to see the file list, or query the API:
+
+```bash
+curl http://localhost:8000/api/status
+```
+
+### 6. Trigger the pipeline manually
+
+The processing pipeline runs automatically on the cron schedule. To trigger it immediately:
+
+```bash
+curl -X POST http://localhost:8000/api/process
+```
+
+> **Note**: The pipeline is a stub in Phase 1. Transcription and LLM processing are wired in Phase 2.
+
+---
+
 ## What It Does
 
 - Accepts audio file uploads via a web app or local directory

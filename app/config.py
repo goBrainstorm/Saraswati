@@ -30,6 +30,7 @@ class Settings(BaseSettings):
 
     # Whisper (Phase 2)
     whisper_model: str = Field(default="large-v3", alias="WHISPER_MODEL")
+    denoise_max_mb: float = Field(default=100.0, alias="DENOISE_MAX_MB")
 
     # Qdrant (Phase 3)
     qdrant_url: str = Field(default="http://localhost:6333", alias="QDRANT_URL")

@@ -16,8 +16,15 @@ scheduler = AsyncIOScheduler()
 # ---------------------------------------------------------------------------
 
 async def pipeline_job() -> None:
-    """Scheduled pipeline trigger (Phase 2 will wire Whisper + LLM here)."""
-    logger.info("Scheduled pipeline_job fired — processing stub, no-op in Phase 1.")
+    """Scheduled pipeline: process all pending files then refresh cache."""
+    from app.services.pipeline import process_pending_files
+    from app.services.cache import write_recent_cache
+
+    logger.info("pipeline_job starting.")
+    count = await process_pending_files()
+    logger.info("pipeline_job processed %d file(s).", count)
+    cache_count = await write_recent_cache()
+    logger.info("Cache refreshed: %d entries in recent.json.", cache_count)
 
 
 async def cleanup_job() -> None:

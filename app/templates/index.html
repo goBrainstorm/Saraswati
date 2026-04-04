@@ -383,11 +383,12 @@
         }
       });
 
-      // Show the selected filename in the upload area
+      // Show the selected filename then auto-submit
       fileInput.addEventListener('change', () => {
         const name = fileInput.files[0]?.name;
         if (name) {
           dropZone.querySelector('p').textContent = 'Selected: ' + name;
+          htmx.trigger('#upload-form', 'submit');
         }
       });
     })();

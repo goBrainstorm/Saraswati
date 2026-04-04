@@ -7,6 +7,7 @@
       <th>Processed</th>
       <th>Nextcloud</th>
       <th>Delete After</th>
+      <th></th>
     </tr>
   </thead>
   <tbody>
@@ -18,10 +19,20 @@
       <td>{{ r.processed_at.strftime('%Y-%m-%d %H:%M') if r.processed_at else '—' }}</td>
       <td>{{ r.nextcloud_path if r.nextcloud_path else '—' }}</td>
       <td>{{ r.delete_after.strftime('%Y-%m-%d') if r.delete_after else '—' }}</td>
+      <td style="text-align: right;">
+        <button 
+          class="secondary" 
+          style="padding: 0.25rem 0.5rem; font-size: 0.75rem; border-color: var(--danger); color: var(--danger);"
+          hx-delete="/api/status/{{ r.id }}" 
+          hx-target="closest tr" 
+          hx-swap="outerHTML" 
+          hx-confirm="Are you sure you want to delete this file?"
+        >Delete</button>
+      </td>
     </tr>
     {% else %}
     <tr>
-      <td colspan="6" style="text-align:center; color: var(--muted);">No files uploaded yet.</td>
+      <td colspan="7" style="text-align:center; color: var(--muted);">No files uploaded yet.</td>
     </tr>
     {% endfor %}
   </tbody>

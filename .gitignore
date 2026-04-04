@@ -35,6 +35,9 @@ build/
 .cursor/
 *.swp
 
+# Claude Code local settings (machine-specific permissions)
+.claude/settings.local.json
+
 # OS files
 .DS_Store
 Thumbs.db

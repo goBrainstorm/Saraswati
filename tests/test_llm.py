@@ -14,19 +14,19 @@ async def test_translate_skips_english_variants():
 
 
 async def test_translate_raises_when_url_empty(monkeypatch):
-    monkeypatch.setattr("app.config.settings.llama_server_url", "")
+    monkeypatch.setattr("app.services.llm.settings.llama_server_url", "")
     with pytest.raises(RuntimeError, match="LLAMA_SERVER_URL"):
         await translate("Hallo", "de")
 
 
 async def test_summarize_raises_when_url_empty(monkeypatch):
-    monkeypatch.setattr("app.config.settings.llama_server_url", "")
+    monkeypatch.setattr("app.services.llm.settings.llama_server_url", "")
     with pytest.raises(RuntimeError, match="LLAMA_SERVER_URL"):
         await summarize("text")
 
 
 async def test_extract_raises_when_url_empty(monkeypatch):
-    monkeypatch.setattr("app.config.settings.llama_server_url", "")
+    monkeypatch.setattr("app.services.llm.settings.llama_server_url", "")
     with pytest.raises(RuntimeError, match="LLAMA_SERVER_URL"):
         await extract("text")
 

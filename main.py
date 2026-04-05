@@ -56,7 +56,7 @@ async def lifespan(app: FastAPI):
 # ---------------------------------------------------------------------------
 app = FastAPI(
     title="Personal Knowledge Base",
-    description="Self-hosted audio ingestion and knowledge pipeline — Phase 1",
+    description="Self-hosted audio ingestion and knowledge pipeline — Phase 2",
     version="0.1.0",
     lifespan=lifespan,
 )

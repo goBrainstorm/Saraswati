@@ -268,7 +268,7 @@
     <!-- Header -->
     <header>
       <h1>Personal Knowledge Base</h1>
-      <p>Self-hosted audio ingestion pipeline — Phase 1</p>
+      <p>Self-hosted audio ingestion and knowledge pipeline — Phase 2</p>
     </header>
 
     <!-- ---------------------------------------------------------------- -->
@@ -322,12 +322,34 @@
     </section>
 
     <!-- ---------------------------------------------------------------- -->
+    <!-- Entries section                                                    -->
+    <!-- ---------------------------------------------------------------- -->
+    <section>
+      <h2>
+        Processed Entries
+        <span class="htmx-indicator" id="entries-spinner" style="font-size:0.75rem; color:var(--muted); font-weight:400; letter-spacing:0; text-transform:none; margin-left:0.5rem;">
+          refreshing<span class="spinner"></span>
+        </span>
+      </h2>
+
+      <div
+        id="entries-panel"
+        hx-get="/api/entries/table"
+        hx-trigger="load, every 15s"
+        hx-swap="innerHTML"
+        hx-indicator="#entries-spinner"
+      >
+        <p style="color:var(--muted); font-size:0.875rem;">Loading...</p>
+      </div>
+    </section>
+
+    <!-- ---------------------------------------------------------------- -->
     <!-- Manual trigger section                                            -->
     <!-- ---------------------------------------------------------------- -->
     <section>
       <h2>Pipeline Control</h2>
       <div class="trigger-row">
-        <p>Manually trigger the processing pipeline. In Phase 1 this is a stub — no actual transcription occurs.</p>
+        <p>Manually trigger the processing pipeline. Processes all pending audio files through Whisper transcription and LLM analysis.</p>
         <button
           hx-post="/api/process"
           hx-target="#process-result"
@@ -344,8 +366,21 @@
       <div id="process-result"></div>
     </section>
 
+    <!-- ---------------------------------------------------------------- -->
+    <!-- Prompt configuration section                                       -->
+    <!-- ---------------------------------------------------------------- -->
+    <section id="prompts-section">
+      <h2>Prompt Configuration</h2>
+      <p style="color:var(--muted); font-size:0.875rem; margin-bottom:1.5rem;">
+        Edit the prompts used by the LLM pipeline. Changes take effect on the next pipeline run.
+      </p>
+      <div id="prompts-container">
+        <p style="color:var(--muted); font-size:0.875rem;">Loading...</p>
+      </div>
+    </section>
+
     <footer>
-      Knowledge Base &mdash; Phase 1 scaffold &mdash; self-hosted
+      Knowledge Base &mdash; Phase 2 &mdash; self-hosted
     </footer>
   </div>
 
@@ -446,6 +481,59 @@
       } else {
         el.className = 'result-err';
         el.textContent = 'Trigger failed: HTTP ' + evt.detail.xhr.status;
+      }
+    }
+    (async function loadPrompts() {
+      const container = document.getElementById('prompts-container');
+      if (!container) return;
+      try {
+        const resp = await fetch('/api/prompts');
+        const prompts = await resp.json();
+        const labels = {
+          translate_system: 'Translate — System',
+          translate_user:   'Translate — User template',
+          summarize_system: 'Summarize — System',
+          summarize_user:   'Summarize — User template',
+          extract_system:   'Extract — System',
+          extract_user:     'Extract — User template',
+        };
+        container.innerHTML = Object.entries(prompts).map(([key, val]) => `
+          <div style="margin-bottom:1.5rem;">
+            <label style="display:block; font-size:0.8rem; color:var(--muted); margin-bottom:0.4rem; text-transform:uppercase; letter-spacing:0.05em;">
+              ${labels[key] || key}
+            </label>
+            <textarea id="prompt-${key}" rows="4" style="width:100%; background:var(--bg); color:var(--text); border:1px solid var(--border); border-radius:var(--radius); padding:0.6rem; font-family:monospace; font-size:0.8rem; resize:vertical;">${val.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</textarea>
+            <button onclick="savePrompt('${key}')" class="secondary" style="margin-top:0.4rem; font-size:0.8rem; padding:0.3rem 0.8rem;">Save</button>
+            <span id="prompt-msg-${key}" style="font-size:0.8rem; margin-left:0.75rem; color:var(--muted);"></span>
+          </div>
+        `).join('');
+      } catch (e) {
+        container.innerHTML = '<p style="color:var(--danger)">Failed to load prompts.</p>';
+      }
+    })();
+
+    async function savePrompt(key) {
+      const textarea = document.getElementById('prompt-' + key);
+      const msgEl = document.getElementById('prompt-msg-' + key);
+      if (!textarea) return;
+      msgEl.textContent = 'Saving\u2026';
+      msgEl.style.color = 'var(--muted)';
+      try {
+        const resp = await fetch('/api/prompts/' + key, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: textarea.value }),
+        });
+        if (resp.ok) {
+          msgEl.textContent = 'Saved.';
+          msgEl.style.color = 'var(--success)';
+        } else {
+          msgEl.textContent = 'Error: ' + resp.status;
+          msgEl.style.color = 'var(--danger)';
+        }
+      } catch {
+        msgEl.textContent = 'Network error.';
+        msgEl.style.color = 'var(--danger)';
       }
     }
   </script>

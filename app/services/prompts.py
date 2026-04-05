@@ -7,9 +7,12 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+_lock = threading.Lock()
 
 DEFAULTS: dict[str, str] = {
     "translate_system": (
@@ -47,7 +50,8 @@ DEFAULTS: dict[str, str] = {
 
 
 def _prompts_path() -> Path:
-    return Path("data") / "prompts.json"
+    # Anchor to the project root (three levels up from app/services/prompts.py)
+    return Path(__file__).resolve().parent.parent.parent / "data" / "prompts.json"
 
 
 def load_prompts() -> dict[str, str]:
@@ -75,9 +79,10 @@ def update_prompt(name: str, text: str) -> None:
     """
     if name not in DEFAULTS:
         raise ValueError(f"Unknown prompt: '{name}'. Valid keys: {list(DEFAULTS)}")
-    current = load_prompts()
-    current[name] = text
-    path = _prompts_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(current, ensure_ascii=False, indent=2), encoding="utf-8")
-    logger.info("Prompt '%s' updated and saved to %s.", name, path)
+    with _lock:
+        current = load_prompts()
+        current[name] = text
+        path = _prompts_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(current, ensure_ascii=False, indent=2), encoding="utf-8")
+        logger.info("Prompt '%s' updated and saved to %s.", name, path)

@@ -428,6 +428,10 @@
       });
     })();
 
+    function _esc(s) {
+      return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    }
+
     function handleUploadResponse(evt) {
       const el = document.getElementById('upload-result');
       if (!el) return;
@@ -435,9 +439,9 @@
         el.className = 'result-ok';
         try {
           const data = JSON.parse(evt.detail.xhr.responseText);
-          el.innerHTML = '<strong>Uploaded:</strong> ' + (data.filename || 'file') +
-            ' &mdash; status: <em>' + (data.status || 'pending') + '</em>' +
-            ' &mdash; id: <code>' + (data.id || '') + '</code>';
+          el.innerHTML = '<strong>Uploaded:</strong> ' + _esc(data.filename || 'file') +
+            ' &mdash; status: <em>' + _esc(data.status || 'pending') + '</em>' +
+            ' &mdash; id: <code>' + _esc(data.id || '') + '</code>';
         } catch {
           el.textContent = 'Upload successful.';
         }
@@ -453,10 +457,10 @@
           const data = JSON.parse(evt.detail.xhr.responseText);
           const detail = data.detail;
           if (detail && detail.message) {
-            el.innerHTML = '<strong>Error:</strong> ' + detail.message;
+            el.innerHTML = '<strong>Error:</strong> ' + _esc(detail.message);
             if (detail.existing) {
-              el.innerHTML += ' (existing id: <code>' + detail.existing.id + '</code>, status: ' +
-                detail.existing.status + ')';
+              el.innerHTML += ' (existing id: <code>' + _esc(detail.existing.id) + '</code>, status: ' +
+                _esc(detail.existing.status) + ')';
             }
           } else {
             el.textContent = 'Upload failed: HTTP ' + evt.detail.xhr.status;
@@ -497,16 +501,19 @@
           extract_system:   'Extract — System',
           extract_user:     'Extract — User template',
         };
-        container.innerHTML = Object.entries(prompts).map(([key, val]) => `
+        container.innerHTML = Object.entries(prompts).filter(([key]) => key in labels).map(([key, val]) => `
           <div style="margin-bottom:1.5rem;">
             <label style="display:block; font-size:0.8rem; color:var(--muted); margin-bottom:0.4rem; text-transform:uppercase; letter-spacing:0.05em;">
-              ${labels[key] || key}
+              ${labels[key]}
             </label>
             <textarea id="prompt-${key}" rows="4" style="width:100%; background:var(--bg); color:var(--text); border:1px solid var(--border); border-radius:var(--radius); padding:0.6rem; font-family:monospace; font-size:0.8rem; resize:vertical;">${val.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</textarea>
-            <button onclick="savePrompt('${key}')" class="secondary" style="margin-top:0.4rem; font-size:0.8rem; padding:0.3rem 0.8rem;">Save</button>
+            <button data-prompt-key="${key}" class="secondary prompt-save-btn" style="margin-top:0.4rem; font-size:0.8rem; padding:0.3rem 0.8rem;">Save</button>
             <span id="prompt-msg-${key}" style="font-size:0.8rem; margin-left:0.75rem; color:var(--muted);"></span>
           </div>
         `).join('');
+        container.querySelectorAll('.prompt-save-btn').forEach(btn => {
+          btn.addEventListener('click', () => savePrompt(btn.dataset.promptKey));
+        });
       } catch (e) {
         container.innerHTML = '<p style="color:var(--danger)">Failed to load prompts.</p>';
       }

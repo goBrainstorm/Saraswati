@@ -23,7 +23,7 @@ async def test_process_pending_returns_zero_when_empty(db_engine):
     assert count == 0
 
 
-async def test_process_pending_counts_attempted(db_session: Session):
+async def test_process_pending_counts_attempted(db_engine, db_session: Session):
     record = _make_record()
     db_session.add(record)
     db_session.commit()
@@ -31,8 +31,13 @@ async def test_process_pending_counts_attempted(db_session: Session):
     count = await process_pending_files()
     assert count == 1
 
+    with Session(db_engine) as session:
+        updated = session.get(FileRecord, record.id)
 
-async def test_pipeline_marks_failed_for_missing_file(db_engine, db_session: Session):
+    assert updated.status != "pending"
+
+
+async def test_pipeline_fails_cleanly_for_missing_file(db_engine, db_session: Session):
     record = _make_record()
     db_session.add(record)
     db_session.commit()
@@ -45,17 +50,4 @@ async def test_pipeline_marks_failed_for_missing_file(db_engine, db_session: Ses
 
     assert updated.status == "failed"
     assert updated.processed_at is not None
-
-
-async def test_pipeline_status_not_left_as_processing(db_engine, db_session: Session):
-    record = _make_record()
-    db_session.add(record)
-    db_session.commit()
-    db_session.refresh(record)
-
-    await run_pipeline(record)
-
-    with Session(db_engine) as session:
-        updated = session.get(FileRecord, record.id)
-
     assert updated.status != "processing"

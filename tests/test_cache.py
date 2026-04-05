@@ -74,8 +74,8 @@ async def test_cache_includes_recent_entries(db_engine, db_session, tmp_path, mo
     monkeypatch.setattr("app.config.settings.cache_dir", str(cache_dir))
 
     record = _make_file_record(db_session, filename="audio.m4a")
-    one_day_ago = datetime.now(timezone.utc) - timedelta(days=1)
-    entry = _make_entry(db_session, record.id, created_at=one_day_ago, transcription="recent text")
+    just_within_cutoff = datetime.now(timezone.utc) - timedelta(days=6, hours=23, minutes=59)
+    entry = _make_entry(db_session, record.id, created_at=just_within_cutoff, transcription="recent text")
 
     count = await write_recent_cache()
 
@@ -94,8 +94,8 @@ async def test_cache_excludes_old_entries(db_engine, db_session, tmp_path, monke
     monkeypatch.setattr("app.config.settings.cache_dir", str(cache_dir))
 
     record = _make_file_record(db_session, filename="old.m4a")
-    eight_days_ago = datetime.now(timezone.utc) - timedelta(days=8)
-    _make_entry(db_session, record.id, created_at=eight_days_ago, transcription="old text")
+    just_over_cutoff = datetime.now(timezone.utc) - timedelta(days=7, seconds=1)
+    _make_entry(db_session, record.id, created_at=just_over_cutoff, transcription="old text")
 
     count = await write_recent_cache()
 

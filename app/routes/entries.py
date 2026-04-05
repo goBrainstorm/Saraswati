@@ -1,24 +1,14 @@
-from pathlib import Path as _Path
 from typing import List
 
-import jinja2
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import HTMLResponse
-from fastapi.templating import Jinja2Templates
 from sqlmodel import select
 
 from app.database import get_session
 from app.models import Entry, FileRecord
+from app.templates_env import templates
 
 router = APIRouter()
-
-_TEMPLATES_DIR = _Path(__file__).parent.parent / "templates"
-_jinja_env = jinja2.Environment(
-    loader=jinja2.FileSystemLoader(str(_TEMPLATES_DIR)),
-    autoescape=jinja2.select_autoescape(["html"]),
-    cache_size=0,
-)
-templates = Jinja2Templates(env=_jinja_env)
 
 
 @router.get("/api/entries", response_model=List[Entry])

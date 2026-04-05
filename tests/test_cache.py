@@ -110,7 +110,8 @@ async def test_cache_atomic_write_leaves_no_tmp(db_engine, db_session, tmp_path,
     monkeypatch.setattr("app.config.settings.cache_dir", str(cache_dir))
 
     record = _make_file_record(db_session)
-    _make_entry(db_session, record.id)
+    one_day_ago = datetime.now(timezone.utc) - timedelta(days=1)
+    _make_entry(db_session, record.id, created_at=one_day_ago)
 
     await write_recent_cache()
 
@@ -124,10 +125,12 @@ async def test_cache_extracted_json_parsed(db_engine, db_session, tmp_path, monk
     monkeypatch.setattr("app.config.settings.cache_dir", str(cache_dir))
 
     record = _make_file_record(db_session)
+    one_day_ago = datetime.now(timezone.utc) - timedelta(days=1)
     payload = {"key": "value", "number": 42}
     _make_entry(
         db_session,
         record.id,
+        created_at=one_day_ago,
         extracted_json=json.dumps(payload),
     )
 

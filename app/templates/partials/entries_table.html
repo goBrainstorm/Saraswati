@@ -1,0 +1,26 @@
+<table>
+  <thead>
+    <tr>
+      <th>Filename</th>
+      <th>Language</th>
+      <th>Summary</th>
+      <th>Processed At</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for e in entries %}
+    <tr>
+      <td title="{{ e.file_id }}">{{ e.filename if e.filename else '—' }}</td>
+      <td>{{ e.language if e.language else '—' }}</td>
+      <td title="{{ e.summary if e.summary else '' }}">
+        {{ e.summary[:120] ~ '…' if e.summary and e.summary|length > 120 else (e.summary if e.summary else '—') }}
+      </td>
+      <td>{{ e.created_at.strftime('%Y-%m-%d %H:%M') if e.created_at else '—' }}</td>
+    </tr>
+    {% else %}
+    <tr>
+      <td colspan="4" style="text-align:center; color: var(--muted);">No entries processed yet.</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>

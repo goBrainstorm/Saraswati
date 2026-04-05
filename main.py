@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
 from app.database import create_db_and_tables
-from app.routes import process, status, upload
+from app.routes import entries, process, status, upload
 from app.scheduler import start_scheduler, stop_scheduler
 
 # ---------------------------------------------------------------------------
@@ -66,6 +66,7 @@ app = FastAPI(
 # ---------------------------------------------------------------------------
 app.include_router(upload.router)
 app.include_router(status.router)
+app.include_router(entries.router)
 app.include_router(process.router)
 
 

@@ -59,3 +59,41 @@ def test_load_merges_saved_with_defaults(tmp_path, monkeypatch):
     assert loaded["translate_system"] == "Custom."
     # Other keys still have defaults
     assert loaded["summarize_system"] == prompts_svc.DEFAULTS["summarize_system"]
+
+
+# ---------------------------------------------------------------------------
+# HTTP-level tests
+# ---------------------------------------------------------------------------
+import pytest
+from httpx import AsyncClient
+
+
+@pytest.mark.anyio
+async def test_get_prompts_returns_all_keys(app_client: AsyncClient, db_engine, tmp_path, monkeypatch):
+    monkeypatch.setattr("app.services.prompts._prompts_path", lambda: tmp_path / "data" / "prompts.json")
+    resp = await app_client.get("/api/prompts")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert set(data.keys()) == {"translate_system", "translate_user", "summarize_system",
+                                 "summarize_user", "extract_system", "extract_user"}
+
+
+@pytest.mark.anyio
+async def test_put_prompt_updates_value(app_client: AsyncClient, db_engine, tmp_path, monkeypatch):
+    monkeypatch.setattr("app.services.prompts._prompts_path", lambda: tmp_path / "data" / "prompts.json")
+    resp = await app_client.put(
+        "/api/prompts/translate_system",
+        json={"text": "New system prompt."},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["translate_system"] == "New system prompt."
+
+
+@pytest.mark.anyio
+async def test_put_unknown_prompt_returns_422(app_client: AsyncClient, db_engine):
+    resp = await app_client.put(
+        "/api/prompts/nonexistent_key",
+        json={"text": "something"},
+    )
+    assert resp.status_code == 422

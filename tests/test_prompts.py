@@ -64,12 +64,11 @@ def test_load_merges_saved_with_defaults(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 # HTTP-level tests
 # ---------------------------------------------------------------------------
-import pytest
 from httpx import AsyncClient
 
 
 @pytest.mark.anyio
-async def test_get_prompts_returns_all_keys(app_client: AsyncClient, db_engine, tmp_path, monkeypatch):
+async def test_get_prompts_returns_all_keys(app_client: AsyncClient, tmp_path, monkeypatch):
     monkeypatch.setattr("app.services.prompts._prompts_path", lambda: tmp_path / "data" / "prompts.json")
     resp = await app_client.get("/api/prompts")
     assert resp.status_code == 200
@@ -79,7 +78,7 @@ async def test_get_prompts_returns_all_keys(app_client: AsyncClient, db_engine, 
 
 
 @pytest.mark.anyio
-async def test_put_prompt_updates_value(app_client: AsyncClient, db_engine, tmp_path, monkeypatch):
+async def test_put_prompt_updates_value(app_client: AsyncClient, tmp_path, monkeypatch):
     monkeypatch.setattr("app.services.prompts._prompts_path", lambda: tmp_path / "data" / "prompts.json")
     resp = await app_client.put(
         "/api/prompts/translate_system",
@@ -91,7 +90,7 @@ async def test_put_prompt_updates_value(app_client: AsyncClient, db_engine, tmp_
 
 
 @pytest.mark.anyio
-async def test_put_unknown_prompt_returns_422(app_client: AsyncClient, db_engine):
+async def test_put_unknown_prompt_returns_422(app_client: AsyncClient):
     resp = await app_client.put(
         "/api/prompts/nonexistent_key",
         json={"text": "something"},

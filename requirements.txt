@@ -9,6 +9,8 @@ python-multipart
 jinja2
 aiofiles
 faster-whisper
+sentence-transformers
+qdrant-client
 
 # Dev / test
 pytest

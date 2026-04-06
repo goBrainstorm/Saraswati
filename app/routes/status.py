@@ -69,7 +69,11 @@ async def get_file_detail(file_id: UUID) -> Dict[str, Any]:
 
 @router.delete("/api/status/{file_id}")
 async def delete_file(file_id: UUID) -> Response:
-    """Delete a file record, its associated entries, and the physical file."""
+    """Delete a file record and the physical audio file.
+
+    Entry records (transcription, translation, summary) are preserved so that
+    processed content is not accidentally destroyed.
+    """
     with get_session() as session:
         record = session.get(FileRecord, file_id)
         if not record:
@@ -82,12 +86,7 @@ async def delete_file(file_id: UUID) -> Response:
             except OSError as e:
                 logger.error(f"Failed to delete physical file {record.local_path}: {e}")
 
-        # Delete associated entries
-        entries = session.exec(select(Entry).where(Entry.file_id == file_id)).all()
-        for entry in entries:
-            session.delete(entry)
-
-        # Delete the file record
+        # Delete the file record (Entry records are intentionally kept)
         session.delete(record)
         session.commit()
 

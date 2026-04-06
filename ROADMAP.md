@@ -113,7 +113,7 @@ The system runs on a dedicated home server, is accessible remotely over Tailscal
 - [x] Scheduled job runner (APScheduler) wired into FastAPI — configurable cron schedule (default: daily at 03:00)
 - [x] Nextcloud integration: WebDAV upload stub (skips gracefully if unconfigured)
 - [x] Local file deletion job: removes files older than N days (configurable)
-- [ ] Tailscale access: server binds to Tailscale interface address (configure on remote deploy)
+- [x] Tailscale access: server binds to Tailscale interface address (configure on remote deploy)
 - [x] Minimal web frontend: file upload form, processing status list, manual trigger button (HTMX)
 
 **Deliverables**: Files can be uploaded, stored, tracked and archived to Nextcloud.
@@ -144,22 +144,22 @@ The system runs on a dedicated home server, is accessible remotely over Tailscal
 
 ---
 
-### Phase 2 — Transcription & LLM Processing Pipeline
+### Phase 2 — Transcription & LLM Processing Pipeline ✅
 
 **Goal**: Audio files are transcribed by Whisper and then processed by Gemma-4-E4B for translation, summarization, and extraction.
 
-- [ ] faster-whisper integration: audio → text, language detection, per-file model selection
-- [ ] Audio preprocessing: ffmpeg-based audio normalization before transcription
-- [ ] Denoising: skip for files above configurable size threshold
-- [ ] llama.cpp server integration: FastAPI backend calls `llama-server` OpenAI-compatible `/chat/completions`
-- [ ] Prompt chains for (prompt editing on Web app):
-  - [ ] **Translation**: transcript → English (skip if already English)
-  - [ ] **Summarization**: translated text → concise summary with key points
-  - [ ] **Extraction**: structured JSON extraction of entities (people, places), personal facts, action items, topics, tags
-- [ ] SQLite `entries` table populated with all outputs
-- [ ] Short-term cache writer: after each pipeline run, serialize last 7 days of entries to `cache/recent.json`
-- [ ] Processing state machine: `pending → processing → done | failed`; failed entries logged and retryable
-- [ ] `/api/status` endpoint exposes pipeline state and per-file results
+- [x] faster-whisper integration: audio → text, language detection, per-file model selection
+- [x] Audio preprocessing: ffmpeg-based audio normalization before transcription
+- [x] Denoising: skip for files above configurable size threshold
+- [x] llama.cpp server integration: FastAPI backend calls `llama-server` OpenAI-compatible `/chat/completions`
+- [x] Prompt chains for (prompt editing on Web app):
+  - [x] **Translation**: transcript → English (skip if already English)
+  - [x] **Summarization**: translated text → concise summary with key points
+  - [x] **Extraction**: structured JSON extraction of entities (people, places), personal facts, action items, topics, tags
+- [x] SQLite `entries` table populated with all outputs
+- [x] Short-term cache writer: after each pipeline run, serialize last 7 days of entries to `cache/recent.json`
+- [x] Processing state machine: `pending → processing → done | failed`; failed entries logged and retryable
+- [x] `/api/status` endpoint exposes pipeline state and per-file results
 
 **Deliverables**: Audio in → structured knowledge out, stored in SQLite and cache file.
 
@@ -169,9 +169,9 @@ The system runs on a dedicated home server, is accessible remotely over Tailscal
 
 **Goal**: All processed knowledge is semantically searchable; the chat endpoint can retrieve relevant context.
 
-- [ ] Qdrant deployment: Docker container on same server
-- [ ] Embedding model: sentence-transformers (e.g., `all-MiniLM-L6-v2`) or Gemma-4-E4B embeddings if exposed by llama.cpp
-- [ ] Embedding pipeline: on entry completion, vectorize `transcription + summary + extracted_facts`, upsert into Qdrant
+- [x] Qdrant deployment: Docker container on same server
+- [x] Embedding model: sentence-transformers (e.g., `all-MiniLM-L6-v2`) or Gemma-4-E4B embeddings if exposed by llama.cpp
+- [x] Embedding pipeline: on entry completion, vectorize `transcription + summary + extracted_facts`, upsert into Qdrant
 - [ ] Backfill job: embed all existing entries on first run
 - [ ] `/api/chat` RAG endpoint:
   - [ ] Embed the user query
@@ -293,3 +293,53 @@ CREATE TABLE pipeline_steps (
     error    TEXT                -- error message if failed
 );
 ```
+
+---
+
+### Checkpoint-based pipeline recovery (LLM unavailability)
+
+**Requested 2026-04-06. Do not implement until explicitly tasked.**
+
+#### Problem
+
+The current pipeline wraps all steps — Whisper transcription through all LLM steps — in a single `try/except`. Any failure (including the LLM server being unreachable) marks the file `failed` and discards all partial progress. Re-triggering the pipeline re-transcribes from scratch and fails again at the same LLM step.
+
+When the LLM server is temporarily down (e.g. `ollama serve` not running), every file stays `failed` until manually reset, and Whisper work is wasted on each retry.
+
+#### Desired behaviour
+
+- Transcription result is **persisted to the database immediately** after Whisper completes, before any LLM call is attempted.
+- If an LLM call fails (connectivity, timeout, model error), the file is set to a `transcribed` status rather than `failed`.
+- On the next pipeline trigger, files with `status=transcribed` **skip Whisper** and resume from the LLM step (translate → summarize → extract).
+- LLM failures are logged with a clear message indicating that the file will be retried automatically on next run.
+
+#### Implementation notes
+
+**State machine additions** (`files.status`):
+
+```
+pending → processing → transcribed → done | failed
+                             ↑
+                  re-entered on next pipeline run
+                  (skips Whisper, resumes at LLM)
+```
+
+**`run_pipeline()` changes** (`app/services/pipeline.py`):
+
+1. Split the single `try/except` into two stages:
+   - **Stage A — Whisper**: `pending → processing → transcribed`. On exception, mark `failed`.
+   - **Stage B — LLM**: `transcribed → processing → done`. On LLM connectivity error specifically, revert to `transcribed` (not `failed`) so it is retried next run. Other fatal errors (bad JSON, etc.) still mark `failed`.
+2. Persist transcription + language to a new `Entry` row (with null LLM fields) at end of Stage A.
+3. Stage B updates the existing `Entry` row with translation, summary, extracted_json.
+
+**`process_pending_files()` changes** (`app/services/pipeline.py`):
+
+- Query `status IN ('pending', 'transcribed')` instead of only `pending`.
+- Pass a flag or check `entry` existence to know which stage to run.
+
+**LLM error classification** (`app/services/llm.py`):
+
+- Catch `httpx.ConnectError` and `httpx.TimeoutException` separately and re-raise as a typed `LLMUnavailableError`.
+- Pipeline Stage B catches `LLMUnavailableError` → revert to `transcribed`. All other exceptions → `failed`.
+
+**DB migration**: `files.status` is already a plain `TEXT` column with no enum constraint, so adding `transcribed` requires no schema migration — only code changes.

@@ -88,7 +88,7 @@ async def index() -> FileResponse:
 if __name__ == "__main__":
     uvicorn.run(
         "main:app",
-        host=settings.host,
+        host=settings.tailscale_host,
         port=settings.port,
         reload=False,
         log_level="info",

@@ -248,3 +248,48 @@ DB_PATH                 — SQLite file path
 4. **Open WebUI RAG vs custom RAG**: Open WebUI has built-in RAG. The decision of whether to use Open WebUI's internal RAG (pointing it directly at Qdrant) or route all chat through the custom `/api/chat` endpoint affects architecture complexity. Both options are viable.
 
 5. **Nextcloud auth**: WebDAV with username/password is the baseline. App passwords should be used rather than the main account credentials.
+
+---
+
+## Backlog — Pending Feature Specs
+
+### Batch-first pipeline ordering + per-file step visibility
+
+**Requested 2026-04-06. Do not implement until explicitly tasked.**
+
+#### Pipeline ordering change
+
+Currently `process_pending_files()` in `app/services/pipeline.py` runs the full pipeline for each file sequentially (transcribe → translate → summarize → extract per file). Change this to a **batch-first, step-first** execution order:
+
+1. **Transcribe all pending files first** — run `whisper_service.transcribe()` on every pending file before any LLM step begins.
+2. **Translate all files** — once all transcriptions are complete, run `llm.translate()` on every file that needs it.
+3. **Summarize all files** — then `llm.summarize()` on every file.
+4. **Extract all files** — then `llm.extract()` on every file.
+5. Write all `Entry` records and mark files `done` at the end.
+
+This allows Whisper (CPU-bound) to complete its full batch before the LLM server (separate process) takes over, avoiding resource contention and making progress more visible.
+
+State machine change: the `files.status` column will need intermediate states beyond `pending → processing → done | failed`. Proposed additional states: `transcribed`, `translated` (optional — evaluate whether DB granularity is worth the added complexity vs. storing step progress in a separate `pipeline_steps` table).
+
+#### Per-file step visibility in the UI
+
+Add a **pipeline step log** visible in the Entries section of the frontend:
+
+- In the "Processed Entries" table, each row should have an expandable detail panel (or a link to a modal/separate view).
+- The detail panel shows a **step timeline** for that file: each pipeline stage (Transcribe, Translate, Summarize, Extract, Upload) with its status (pending / running / done / failed) and timestamp.
+- This requires a new `pipeline_steps` table in SQLite (or a JSON column on `entries`) to record per-step status and timestamps.
+- New API endpoint: `GET /api/entries/{entry_id}/steps` returns the step log for a single entry.
+- The frontend should poll or use HTMX to refresh step status while a file is in-flight.
+
+**Suggested `pipeline_steps` schema:**
+```sql
+CREATE TABLE pipeline_steps (
+    id       TEXT PRIMARY KEY,   -- UUID
+    file_id  TEXT NOT NULL,      -- FK → files.id
+    step     TEXT NOT NULL,      -- 'transcribe' | 'translate' | 'summarize' | 'extract' | 'upload'
+    status   TEXT NOT NULL,      -- 'pending' | 'running' | 'done' | 'failed'
+    started_at  TEXT,
+    finished_at TEXT,
+    error    TEXT                -- error message if failed
+);
+```

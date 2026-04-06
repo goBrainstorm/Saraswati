@@ -474,9 +474,15 @@
         return files.map(f => {
           const row = document.createElement('div');
           row.className = 'queue-row';
-          row.innerHTML =
-            '<span class="queue-filename" title="' + _esc(f.name) + '">' + _esc(f.name) + '</span>' +
-            '<span class="badge badge-pending">pending</span>';
+          const nameSpan = document.createElement('span');
+          nameSpan.className = 'queue-filename';
+          nameSpan.setAttribute('title', f.name);
+          nameSpan.textContent = f.name;
+          const badgeSpan = document.createElement('span');
+          badgeSpan.className = 'badge badge-pending';
+          badgeSpan.textContent = 'pending';
+          row.appendChild(nameSpan);
+          row.appendChild(badgeSpan);
           result.appendChild(row);
           return row;
         });
@@ -512,25 +518,46 @@
             badge.textContent = 'network error';
           }
         }
-        htmx.trigger('#status-panel', 'load');
+        if (typeof htmx !== 'undefined') htmx.trigger('#status-panel', 'load');
       }
 
       // Event wiring
       dropZone.addEventListener('drop', e => {
         const files = collectFiles(e.dataTransfer.files);
-        if (files.length) runQueue(files);
+        if (files.length) {
+          runQueue(files);
+        } else {
+          const result = document.getElementById('upload-result');
+          result.innerHTML = '';
+          result.className = 'result-info';
+          result.textContent = 'No supported audio/video files found in the selection.';
+        }
       });
 
       fileInput.addEventListener('change', () => {
         const files = collectFiles(fileInput.files);
         fileInput.value = '';
-        if (files.length) runQueue(files);
+        if (files.length) {
+          runQueue(files);
+        } else {
+          const result = document.getElementById('upload-result');
+          result.innerHTML = '';
+          result.className = 'result-info';
+          result.textContent = 'No supported audio/video files found in the selection.';
+        }
       });
 
       folderInput.addEventListener('change', () => {
         const files = collectFiles(folderInput.files);
         folderInput.value = '';
-        if (files.length) runQueue(files);
+        if (files.length) {
+          runQueue(files);
+        } else {
+          const result = document.getElementById('upload-result');
+          result.innerHTML = '';
+          result.className = 'result-info';
+          result.textContent = 'No supported audio/video files found in the selection.';
+        }
       });
     })();
 

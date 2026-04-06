@@ -111,15 +111,6 @@
       margin-bottom: 1rem;
     }
 
-    #file-input {
-      position: absolute;
-      inset: 0;
-      opacity: 0;
-      cursor: pointer;
-      width: 100%;
-      height: 100%;
-    }
-
     /* ------------------------------------------------------------------ */
     /* Buttons                                                             */
     /* ------------------------------------------------------------------ */
@@ -215,6 +206,34 @@
     .badge-transcribed  { background: #b45309; color: #fff; }
     .badge-translated   { background: #0369a1; color: #fff; }
     .badge-summarized   { background: #7c3aed; color: #fff; }
+    .badge-uploading  { background: rgba(91,138,245,0.15); color: var(--info);    }
+    .badge-duplicate  { background: rgba(224,168,74,0.15);  color: var(--warning); }
+
+    /* Upload queue */
+    .queue-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0.5rem 0.75rem;
+      border-bottom: 1px solid var(--border);
+      gap: 1rem;
+    }
+    .queue-row:last-child { border-bottom: none; }
+    .queue-filename {
+      flex: 1;
+      min-width: 0;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      font-size: 0.875rem;
+    }
+    #upload-result.queue-mode {
+      padding: 0;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      max-height: 300px;
+      overflow-y: auto;
+    }
 
     /* ------------------------------------------------------------------ */
     /* Process trigger row                                                 */
@@ -321,22 +340,15 @@
     <section>
       <h2>Upload Audio</h2>
 
-      <form
-        id="upload-form"
-        hx-post="/api/upload"
-        hx-target="#upload-result"
-        hx-swap="innerHTML"
-        hx-encoding="multipart/form-data"
-        hx-indicator="#upload-spinner"
-        hx-on::after-request="handleUploadResponse(event)"
-      >
+      <form id="upload-form">
         <div class="upload-area" id="drop-zone">
-          <input type="file" name="file" id="file-input" accept="audio/*,video/*" required />
-          <p>Drag and drop an audio file here, or click to browse</p>
-          <button type="submit" onclick="event.stopPropagation()">Upload File</button>
-          <span class="htmx-indicator" id="upload-spinner">
-            <span class="spinner"></span>
-          </span>
+          <input type="file" id="file-input" multiple accept="audio/*,video/*" style="display:none">
+          <input type="file" id="folder-input" webkitdirectory accept="audio/*,video/*" style="display:none">
+          <p>Drag and drop files or folders here, or:</p>
+          <div style="display:flex; gap:0.75rem; justify-content:center; flex-wrap:wrap;">
+            <button type="button" onclick="event.stopPropagation(); document.getElementById('file-input').click()">Browse Files</button>
+            <button type="button" class="secondary" onclick="event.stopPropagation(); document.getElementById('folder-input').click()">Browse Folder</button>
+          </div>
         </div>
       </form>
 
@@ -433,86 +445,97 @@
   <!-- ------------------------------------------------------------------ -->
   <script>
     (function () {
-      const dropZone = document.getElementById('drop-zone');
-      const fileInput = document.getElementById('file-input');
+      const dropZone    = document.getElementById('drop-zone');
+      const fileInput   = document.getElementById('file-input');
+      const folderInput = document.getElementById('folder-input');
 
+      // Drag-over visual feedback
       ['dragenter', 'dragover'].forEach(evt =>
-        dropZone.addEventListener(evt, e => {
-          e.preventDefault();
-          dropZone.classList.add('drag-over');
-        })
+        dropZone.addEventListener(evt, e => { e.preventDefault(); dropZone.classList.add('drag-over'); })
       );
-
       ['dragleave', 'drop'].forEach(evt =>
-        dropZone.addEventListener(evt, e => {
-          e.preventDefault();
-          dropZone.classList.remove('drag-over');
-        })
+        dropZone.addEventListener(evt, e => { e.preventDefault(); dropZone.classList.remove('drag-over'); })
       );
 
-      dropZone.addEventListener('drop', e => {
-        const files = e.dataTransfer.files;
-        if (files.length) {
-          // Assign dropped file to the input so HTMX picks it up
-          const dt = new DataTransfer();
-          dt.items.add(files[0]);
-          fileInput.files = dt.files;
-          // Programmatically submit the form
-          htmx.trigger('#upload-form', 'submit');
+      // Filter a FileList to audio/video files only
+      function collectFiles(fileList) {
+        const allowed     = /^(audio|video)\//;
+        const extFallback = /\.(mp3|mp4|m4a|wav|flac|ogg|opus|aac|wma|webm|mov|avi|mkv)$/i;
+        return Array.from(fileList).filter(f =>
+          allowed.test(f.type) || extFallback.test(f.name)
+        );
+      }
+
+      // Render one row per file in #upload-result; return the row elements
+      function renderQueue(files) {
+        const result = document.getElementById('upload-result');
+        result.innerHTML = '';
+        result.className = 'queue-mode';
+        return files.map(f => {
+          const row = document.createElement('div');
+          row.className = 'queue-row';
+          row.innerHTML =
+            '<span class="queue-filename" title="' + _esc(f.name) + '">' + _esc(f.name) + '</span>' +
+            '<span class="badge badge-pending">pending</span>';
+          result.appendChild(row);
+          return row;
+        });
+      }
+
+      // Upload files one at a time, updating each row's badge live
+      async function runQueue(files) {
+        if (!files.length) return;
+        const rows = renderQueue(files);
+        for (let i = 0; i < files.length; i++) {
+          const badge = rows[i].querySelector('.badge');
+          badge.className = 'badge badge-uploading';
+          badge.innerHTML = '<span class="spinner" style="margin:0;width:12px;height:12px;"></span>';
+          try {
+            const fd = new FormData();
+            fd.append('file', files[i]);
+            const resp = await fetch('/api/upload', { method: 'POST', body: fd });
+            if (resp.ok) {
+              badge.className = 'badge badge-done';
+              badge.textContent = 'done';
+            } else if (resp.status === 409) {
+              const data = await resp.json().catch(() => ({}));
+              const existingId = data?.detail?.existing?.id ?? '';
+              badge.className = 'badge badge-duplicate';
+              badge.textContent = 'duplicate';
+              if (existingId) badge.title = 'existing id: ' + existingId;
+            } else {
+              badge.className = 'badge badge-failed';
+              badge.textContent = 'error ' + resp.status;
+            }
+          } catch {
+            badge.className = 'badge badge-failed';
+            badge.textContent = 'network error';
+          }
         }
+        htmx.trigger('#status-panel', 'load');
+      }
+
+      // Event wiring
+      dropZone.addEventListener('drop', e => {
+        const files = collectFiles(e.dataTransfer.files);
+        if (files.length) runQueue(files);
       });
 
-      // Show the selected filename then auto-submit
       fileInput.addEventListener('change', () => {
-        const name = fileInput.files[0]?.name;
-        if (name) {
-          dropZone.querySelector('p').textContent = 'Selected: ' + name;
-          htmx.trigger('#upload-form', 'submit');
-        }
+        const files = collectFiles(fileInput.files);
+        fileInput.value = '';
+        if (files.length) runQueue(files);
+      });
+
+      folderInput.addEventListener('change', () => {
+        const files = collectFiles(folderInput.files);
+        folderInput.value = '';
+        if (files.length) runQueue(files);
       });
     })();
 
     function _esc(s) {
       return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-    }
-
-    function handleUploadResponse(evt) {
-      const el = document.getElementById('upload-result');
-      if (!el) return;
-      if (evt.detail.successful) {
-        el.className = 'result-ok';
-        try {
-          const data = JSON.parse(evt.detail.xhr.responseText);
-          el.innerHTML = '<strong>Uploaded:</strong> ' + _esc(data.filename || 'file') +
-            ' &mdash; status: <em>' + _esc(data.status || 'pending') + '</em>' +
-            ' &mdash; id: <code>' + _esc(data.id || '') + '</code>';
-        } catch {
-          el.textContent = 'Upload successful.';
-        }
-        // Reset the form so user can upload again
-        document.getElementById('upload-form').reset();
-        document.querySelector('#drop-zone p').textContent =
-          'Drag and drop an audio file here, or click to browse';
-        // Immediately refresh the status table
-        htmx.trigger('#status-panel', 'load');
-      } else {
-        el.className = 'result-err';
-        try {
-          const data = JSON.parse(evt.detail.xhr.responseText);
-          const detail = data.detail;
-          if (detail && detail.message) {
-            el.innerHTML = '<strong>Error:</strong> ' + _esc(detail.message);
-            if (detail.existing) {
-              el.innerHTML += ' (existing id: <code>' + _esc(detail.existing.id) + '</code>, status: ' +
-                _esc(detail.existing.status) + ')';
-            }
-          } else {
-            el.textContent = 'Upload failed: HTTP ' + evt.detail.xhr.status;
-          }
-        } catch {
-          el.textContent = 'Upload failed: HTTP ' + evt.detail.xhr.status;
-        }
-      }
     }
 
     function handleProcessResponse(evt) {

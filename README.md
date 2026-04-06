@@ -10,6 +10,14 @@ See **[ROADMAP.md](ROADMAP.md)** for the full architecture and implementation pl
 
 ## Setup & Usage
 
+### 0. Install ffmpeg
+
+ffmpeg is required for audio processing. A helper script handles the most common package managers (apt, pacman, brew, dnf):
+
+```bash
+bash install_ffmpeg.sh
+```
+
 ### 1. Install dependencies
 
 ```bash

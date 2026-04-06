@@ -250,6 +250,47 @@
     @keyframes spin { to { transform: rotate(360deg); } }
 
     /* ------------------------------------------------------------------ */
+    /* Entry detail rows                                                   */
+    /* ------------------------------------------------------------------ */
+    .entry-detail {
+      background: var(--bg);
+      border-radius: var(--radius);
+      padding: 0.75rem;
+    }
+
+    .detail-section {
+      margin-bottom: 0.75rem;
+    }
+
+    .detail-section:last-child {
+      margin-bottom: 0;
+    }
+
+    .detail-section strong {
+      display: block;
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+      margin-bottom: 0.3rem;
+    }
+
+    .detail-text {
+      margin: 0;
+      padding: 0.5rem 0.75rem;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      font-family: monospace;
+      font-size: 0.8rem;
+      white-space: pre-wrap;
+      word-break: break-word;
+      max-height: 180px;
+      overflow-y: auto;
+      color: var(--text);
+    }
+
+    /* ------------------------------------------------------------------ */
     /* Footer                                                              */
     /* ------------------------------------------------------------------ */
     footer {
@@ -475,13 +516,29 @@
       const el = document.getElementById('process-result');
       if (!el) return;
       if (evt.detail.successful) {
-        el.className = 'result-info';
         try {
           const data = JSON.parse(evt.detail.xhr.responseText);
-          el.textContent = data.message || 'Pipeline triggered.';
+          if (data.files_processed === 0) {
+            el.className = 'result-info';
+            el.textContent = 'No pending files to process.';
+          } else if (data.failed === 0) {
+            el.className = 'result-ok';
+            el.textContent = 'Processed ' + data.files_processed + ' file(s) — all succeeded.';
+          } else {
+            el.className = 'result-err';
+            let msg = 'Processed ' + data.files_processed + ' file(s): ' +
+              data.succeeded + ' succeeded, ' + data.failed + ' failed.';
+            if (data.errors && data.errors.length) {
+              msg += '\n' + data.errors.map(e => _esc(e.filename) + ': ' + _esc(e.error)).join('\n');
+            }
+            el.textContent = msg;
+          }
         } catch {
+          el.className = 'result-info';
           el.textContent = 'Pipeline triggered.';
         }
+        htmx.trigger('#status-panel', 'load');
+        htmx.trigger('#entries-panel', 'load');
       } else {
         el.className = 'result-err';
         el.textContent = 'Trigger failed: HTTP ' + evt.detail.xhr.status;
@@ -518,6 +575,19 @@
         container.innerHTML = '<p style="color:var(--danger)">Failed to load prompts.</p>';
       }
     })();
+
+    function toggleEntryDetail(id, row) {
+      const detail = document.getElementById(id);
+      if (!detail) return;
+      const arrow = row ? row.querySelector('td:last-child') : null;
+      if (detail.style.display === 'none') {
+        detail.style.display = '';
+        if (arrow) arrow.textContent = '▼';
+      } else {
+        detail.style.display = 'none';
+        if (arrow) arrow.textContent = '▶';
+      }
+    }
 
     async function savePrompt(key) {
       const textarea = document.getElementById('prompt-' + key);

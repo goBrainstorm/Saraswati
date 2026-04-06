@@ -54,6 +54,9 @@ async def entries_table(request: Request) -> HTMLResponse:
                 "language": e.language,
                 "summary": e.summary,
                 "created_at": e.created_at,
+                "transcription": e.transcription,
+                "translation": e.translation,
+                "extracted_json": e.extracted_json,
             }
             for e in raw_entries
         ]

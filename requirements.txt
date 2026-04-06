@@ -9,3 +9,9 @@ python-multipart
 jinja2
 aiofiles
 faster-whisper
+
+# Dev / test
+pytest
+pytest-asyncio
+anyio[trio]
+httpx

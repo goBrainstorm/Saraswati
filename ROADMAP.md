@@ -120,26 +120,26 @@ The system runs on a dedicated home server, is accessible remotely over Tailscal
 
 #### Phase 1 — Tests (pytest + httpx AsyncClient, real SQLite in tmp dir, no mocks)
 
-- [ ] `test_upload.py`
-  - [ ] Valid upload → 200, `FileRecord` with `status=pending`
-  - [ ] Same bytes uploaded again → 409 with existing record in detail
-  - [ ] Filename with path separators (`../../evil.mp3`) → sanitised to basename only
-  - [ ] Upload with no filename → falls back to `"upload"`, no crash
-- [ ] `test_status.py`
-  - [ ] Empty DB → `GET /api/status` returns `[]`
-  - [ ] After upload, record appears in response
-  - [ ] `limit` / `offset` pagination works correctly
-  - [ ] `GET /api/status/table` returns HTML fragment containing the filename
-- [ ] `test_process.py`
-  - [ ] `POST /api/process` → 200, `{"status": "triggered"}`
-- [ ] `test_cleanup.py`
-  - [ ] Ignores records with `status=pending`
-  - [ ] Ignores `done` records where `nextcloud_path` is `None`
-  - [ ] Ignores `done + backed_up` records where `delete_after` is in the future
-  - [ ] Deletes local file when all three conditions met; DB record preserved
-  - [ ] Logs warning (no crash) when local file is already absent
-- [ ] `test_nextcloud.py`
-  - [ ] `upload_file()` returns `""` immediately when `NEXTCLOUD_URL` is empty (no HTTP call made)
+- [x] `test_upload.py`
+  - [x] Valid upload → 200, `FileRecord` with `status=pending`
+  - [x] Same bytes uploaded again → 409 with existing record in detail
+  - [x] Filename with path separators (`../../evil.mp3`) → sanitised to basename only
+  - [x] Upload with no filename → falls back to `"upload"`, no crash
+- [x] `test_status.py`
+  - [x] Empty DB → `GET /api/status` returns `[]`
+  - [x] After upload, record appears in response
+  - [x] `limit` / `offset` pagination works correctly
+  - [x] `GET /api/status/table` returns HTML fragment containing the filename
+- [x] `test_process.py`
+  - [x] `POST /api/process` → 200, `{"status": "complete"}`
+- [x] `test_cleanup.py`
+  - [x] Ignores records with `status=pending`
+  - [x] Ignores `done` records where `nextcloud_path` is `None`
+  - [x] Ignores `done + backed_up` records where `delete_after` is in the future
+  - [x] Deletes local file when all three conditions met; DB record preserved
+  - [x] Logs warning (no crash) when local file is already absent
+- [x] `test_nextcloud.py`
+  - [x] `upload_file()` returns `""` immediately when `NEXTCLOUD_URL` is empty (no HTTP call made)
   - [ ] (Integration, skip in CI): actual WebDAV PUT succeeds against a real Nextcloud
 
 ---

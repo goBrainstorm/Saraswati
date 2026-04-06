@@ -250,6 +250,47 @@
     @keyframes spin { to { transform: rotate(360deg); } }
 
     /* ------------------------------------------------------------------ */
+    /* Entry detail rows                                                   */
+    /* ------------------------------------------------------------------ */
+    .entry-detail {
+      background: var(--bg);
+      border-radius: var(--radius);
+      padding: 0.75rem;
+    }
+
+    .detail-section {
+      margin-bottom: 0.75rem;
+    }
+
+    .detail-section:last-child {
+      margin-bottom: 0;
+    }
+
+    .detail-section strong {
+      display: block;
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+      margin-bottom: 0.3rem;
+    }
+
+    .detail-text {
+      margin: 0;
+      padding: 0.5rem 0.75rem;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      font-family: monospace;
+      font-size: 0.8rem;
+      white-space: pre-wrap;
+      word-break: break-word;
+      max-height: 180px;
+      overflow-y: auto;
+      color: var(--text);
+    }
+
+    /* ------------------------------------------------------------------ */
     /* Footer                                                              */
     /* ------------------------------------------------------------------ */
     footer {
@@ -268,7 +309,7 @@
     <!-- Header -->
     <header>
       <h1>Personal Knowledge Base</h1>
-      <p>Self-hosted audio ingestion pipeline — Phase 1</p>
+      <p>Self-hosted audio ingestion and knowledge pipeline — Phase 2</p>
     </header>
 
     <!-- ---------------------------------------------------------------- -->
@@ -322,12 +363,34 @@
     </section>
 
     <!-- ---------------------------------------------------------------- -->
+    <!-- Entries section                                                    -->
+    <!-- ---------------------------------------------------------------- -->
+    <section>
+      <h2>
+        Processed Entries
+        <span class="htmx-indicator" id="entries-spinner" style="font-size:0.75rem; color:var(--muted); font-weight:400; letter-spacing:0; text-transform:none; margin-left:0.5rem;">
+          refreshing<span class="spinner"></span>
+        </span>
+      </h2>
+
+      <div
+        id="entries-panel"
+        hx-get="/api/entries/table"
+        hx-trigger="load, every 15s"
+        hx-swap="innerHTML"
+        hx-indicator="#entries-spinner"
+      >
+        <p style="color:var(--muted); font-size:0.875rem;">Loading...</p>
+      </div>
+    </section>
+
+    <!-- ---------------------------------------------------------------- -->
     <!-- Manual trigger section                                            -->
     <!-- ---------------------------------------------------------------- -->
     <section>
       <h2>Pipeline Control</h2>
       <div class="trigger-row">
-        <p>Manually trigger the processing pipeline. In Phase 1 this is a stub — no actual transcription occurs.</p>
+        <p>Manually trigger the processing pipeline. Processes all pending audio files through Whisper transcription and LLM analysis.</p>
         <button
           hx-post="/api/process"
           hx-target="#process-result"
@@ -344,8 +407,21 @@
       <div id="process-result"></div>
     </section>
 
+    <!-- ---------------------------------------------------------------- -->
+    <!-- Prompt configuration section                                       -->
+    <!-- ---------------------------------------------------------------- -->
+    <section id="prompts-section">
+      <h2>Prompt Configuration</h2>
+      <p style="color:var(--muted); font-size:0.875rem; margin-bottom:1.5rem;">
+        Edit the prompts used by the LLM pipeline. Changes take effect on the next pipeline run.
+      </p>
+      <div id="prompts-container">
+        <p style="color:var(--muted); font-size:0.875rem;">Loading...</p>
+      </div>
+    </section>
+
     <footer>
-      Knowledge Base &mdash; Phase 1 scaffold &mdash; self-hosted
+      Knowledge Base &mdash; Phase 2 &mdash; self-hosted
     </footer>
   </div>
 
@@ -393,6 +469,10 @@
       });
     })();
 
+    function _esc(s) {
+      return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    }
+
     function handleUploadResponse(evt) {
       const el = document.getElementById('upload-result');
       if (!el) return;
@@ -400,9 +480,9 @@
         el.className = 'result-ok';
         try {
           const data = JSON.parse(evt.detail.xhr.responseText);
-          el.innerHTML = '<strong>Uploaded:</strong> ' + (data.filename || 'file') +
-            ' &mdash; status: <em>' + (data.status || 'pending') + '</em>' +
-            ' &mdash; id: <code>' + (data.id || '') + '</code>';
+          el.innerHTML = '<strong>Uploaded:</strong> ' + _esc(data.filename || 'file') +
+            ' &mdash; status: <em>' + _esc(data.status || 'pending') + '</em>' +
+            ' &mdash; id: <code>' + _esc(data.id || '') + '</code>';
         } catch {
           el.textContent = 'Upload successful.';
         }
@@ -418,10 +498,10 @@
           const data = JSON.parse(evt.detail.xhr.responseText);
           const detail = data.detail;
           if (detail && detail.message) {
-            el.innerHTML = '<strong>Error:</strong> ' + detail.message;
+            el.innerHTML = '<strong>Error:</strong> ' + _esc(detail.message);
             if (detail.existing) {
-              el.innerHTML += ' (existing id: <code>' + detail.existing.id + '</code>, status: ' +
-                detail.existing.status + ')';
+              el.innerHTML += ' (existing id: <code>' + _esc(detail.existing.id) + '</code>, status: ' +
+                _esc(detail.existing.status) + ')';
             }
           } else {
             el.textContent = 'Upload failed: HTTP ' + evt.detail.xhr.status;
@@ -436,16 +516,101 @@
       const el = document.getElementById('process-result');
       if (!el) return;
       if (evt.detail.successful) {
-        el.className = 'result-info';
         try {
           const data = JSON.parse(evt.detail.xhr.responseText);
-          el.textContent = data.message || 'Pipeline triggered.';
+          if (data.files_processed === 0) {
+            el.className = 'result-info';
+            el.textContent = 'No pending files to process.';
+          } else if (data.failed === 0) {
+            el.className = 'result-ok';
+            el.textContent = 'Processed ' + data.files_processed + ' file(s) — all succeeded.';
+          } else {
+            el.className = 'result-err';
+            let msg = 'Processed ' + data.files_processed + ' file(s): ' +
+              data.succeeded + ' succeeded, ' + data.failed + ' failed.';
+            if (data.errors && data.errors.length) {
+              msg += '\n' + data.errors.map(e => _esc(e.filename) + ': ' + _esc(e.error)).join('\n');
+            }
+            el.textContent = msg;
+          }
         } catch {
+          el.className = 'result-info';
           el.textContent = 'Pipeline triggered.';
         }
+        htmx.trigger('#status-panel', 'load');
+        htmx.trigger('#entries-panel', 'load');
       } else {
         el.className = 'result-err';
         el.textContent = 'Trigger failed: HTTP ' + evt.detail.xhr.status;
+      }
+    }
+    (async function loadPrompts() {
+      const container = document.getElementById('prompts-container');
+      if (!container) return;
+      try {
+        const resp = await fetch('/api/prompts');
+        const prompts = await resp.json();
+        const labels = {
+          translate_system: 'Translate — System',
+          translate_user:   'Translate — User template',
+          summarize_system: 'Summarize — System',
+          summarize_user:   'Summarize — User template',
+          extract_system:   'Extract — System',
+          extract_user:     'Extract — User template',
+        };
+        container.innerHTML = Object.entries(prompts).filter(([key]) => key in labels).map(([key, val]) => `
+          <div style="margin-bottom:1.5rem;">
+            <label style="display:block; font-size:0.8rem; color:var(--muted); margin-bottom:0.4rem; text-transform:uppercase; letter-spacing:0.05em;">
+              ${labels[key]}
+            </label>
+            <textarea id="prompt-${key}" rows="4" style="width:100%; background:var(--bg); color:var(--text); border:1px solid var(--border); border-radius:var(--radius); padding:0.6rem; font-family:monospace; font-size:0.8rem; resize:vertical;">${val.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</textarea>
+            <button data-prompt-key="${key}" class="secondary prompt-save-btn" style="margin-top:0.4rem; font-size:0.8rem; padding:0.3rem 0.8rem;">Save</button>
+            <span id="prompt-msg-${key}" style="font-size:0.8rem; margin-left:0.75rem; color:var(--muted);"></span>
+          </div>
+        `).join('');
+        container.querySelectorAll('.prompt-save-btn').forEach(btn => {
+          btn.addEventListener('click', () => savePrompt(btn.dataset.promptKey));
+        });
+      } catch (e) {
+        container.innerHTML = '<p style="color:var(--danger)">Failed to load prompts.</p>';
+      }
+    })();
+
+    function toggleEntryDetail(id, row) {
+      const detail = document.getElementById(id);
+      if (!detail) return;
+      const arrow = row ? row.querySelector('td:last-child') : null;
+      if (detail.style.display === 'none') {
+        detail.style.display = '';
+        if (arrow) arrow.textContent = '▼';
+      } else {
+        detail.style.display = 'none';
+        if (arrow) arrow.textContent = '▶';
+      }
+    }
+
+    async function savePrompt(key) {
+      const textarea = document.getElementById('prompt-' + key);
+      const msgEl = document.getElementById('prompt-msg-' + key);
+      if (!textarea) return;
+      msgEl.textContent = 'Saving\u2026';
+      msgEl.style.color = 'var(--muted)';
+      try {
+        const resp = await fetch('/api/prompts/' + key, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: textarea.value }),
+        });
+        if (resp.ok) {
+          msgEl.textContent = 'Saved.';
+          msgEl.style.color = 'var(--success)';
+        } else {
+          msgEl.textContent = 'Error: ' + resp.status;
+          msgEl.style.color = 'var(--danger)';
+        }
+      } catch {
+        msgEl.textContent = 'Network error.';
+        msgEl.style.color = 'var(--danger)';
       }
     }
   </script>

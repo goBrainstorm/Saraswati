@@ -1,31 +1,20 @@
 import logging
 import os
-from pathlib import Path as _Path
-from typing import List
+from typing import Any, Dict, List, Optional
 from uuid import UUID
 
-import jinja2
 from fastapi import APIRouter, HTTPException, Query, Request, Response
+from fastapi.responses import JSONResponse
 from fastapi.responses import HTMLResponse
-from fastapi.templating import Jinja2Templates
 from sqlmodel import select
 
 from app.database import get_session
 from app.models import Entry, FileRecord
+from app.templates_env import templates
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-
-# Build a Jinja2 Environment with cache_size=0 to avoid the LRUCache
-# dict-key bug in Python 3.14 / Jinja2 3.x under Starlette 1.x.
-_TEMPLATES_DIR = _Path(__file__).parent.parent / "templates"
-_jinja_env = jinja2.Environment(
-    loader=jinja2.FileSystemLoader(str(_TEMPLATES_DIR)),
-    autoescape=jinja2.select_autoescape(["html"]),
-    cache_size=0,  # disable bytecode cache to sidestep the LRUCache bug
-)
-templates = Jinja2Templates(env=_jinja_env)
 
 
 @router.get("/api/status", response_model=List[FileRecord])
@@ -61,6 +50,21 @@ async def status_table(request: Request) -> HTMLResponse:
         "partials/status_table.html",
         {"records": records},
     )
+
+
+@router.get("/api/status/{file_id}")
+async def get_file_detail(file_id: UUID) -> Dict[str, Any]:
+    """Return a FileRecord and its associated Entry (if any)."""
+    with get_session() as session:
+        record = session.get(FileRecord, file_id)
+        if not record:
+            raise HTTPException(status_code=404, detail="File not found")
+        entry_stmt = select(Entry).where(Entry.file_id == file_id)
+        entry = session.exec(entry_stmt).first()
+        return {
+            "file": record.model_dump(),
+            "entry": entry.model_dump() if entry else None,
+        }
 
 
 @router.delete("/api/status/{file_id}")

@@ -19,6 +19,13 @@ async def trigger_process() -> Dict[str, Any]:
     from app.services.cache import write_recent_cache
 
     logger.info("Manual trigger received via POST /api/process.")
-    count = await process_pending_files()
+    result = await process_pending_files()
     cache_count = await write_recent_cache()
-    return {"status": "complete", "files_processed": count, "cache_entries": cache_count}
+    return {
+        "status": "complete",
+        "files_processed": result["attempted"],
+        "succeeded": result["succeeded"],
+        "failed": result["failed"],
+        "errors": result["errors"],
+        "cache_entries": cache_count,
+    }

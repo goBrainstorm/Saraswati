@@ -35,7 +35,42 @@ def _get_model():
             settings.whisper_model,
             device,
         )
-        _model = WhisperModel(settings.whisper_model, device=device, compute_type="int8")
+
+        local_files_only = False
+        try:
+            from huggingface_hub.constants import HF_HUB_CACHE
+            # faster-whisper default models are mapped to Systran/faster-whisper-{size}
+            model_name = settings.whisper_model
+            is_default_model = model_name in [
+                "tiny", "tiny.en", "base", "base.en", "small", "small.en",
+                "medium", "medium.en", "large-v1", "large-v2", "large-v3", "large"
+            ]
+            if is_default_model:
+                repo_id = f"Systran/faster-whisper-{model_name}"
+                expected_cache_dir = os.path.join(HF_HUB_CACHE, "models--" + repo_id.replace("/", "--"))
+                if os.path.exists(expected_cache_dir):
+                    local_files_only = True
+                else:
+                    logger.info(
+                        "Whisper model '%s' not found locally. Downloading from Hugging Face... "
+                        "(this may take several minutes and appear frozen)",
+                        model_name
+                    )
+            elif os.path.isdir(model_name):
+                local_files_only = True
+            else:
+                logger.info(
+                    "Checking/downloading model '%s' from Hugging Face... "
+                    "(this may take several minutes and appear frozen)",
+                    model_name
+                )
+        except Exception:
+            logger.info(
+                "Note: If the model is not cached locally, it will be downloaded from Hugging Face. "
+                "This may take several minutes and appear frozen."
+            )
+
+        _model = WhisperModel(settings.whisper_model, device=device, compute_type="int8", local_files_only=local_files_only)
         logger.info("Whisper model loaded.")
     return _model
 

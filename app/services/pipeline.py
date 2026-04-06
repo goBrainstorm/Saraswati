@@ -4,6 +4,7 @@ import json
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Optional
 
 from sqlmodel import select
 
@@ -17,7 +18,7 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-async def run_pipeline(record: FileRecord) -> None:
+async def run_pipeline(record: FileRecord) -> Optional[str]:
     """Process a single FileRecord through the full AI pipeline.
 
     State transitions:
@@ -28,6 +29,9 @@ async def run_pipeline(record: FileRecord) -> None:
     Nextcloud upload errors do not revert status to failed — the file is
     marked done and nextcloud_path stays None, so the cleanup job will not
     delete the local copy.
+
+    Returns:
+        None on success, error message string on failure.
     """
     from app.services import whisper_service, llm
     from app.services.nextcloud import upload_file
@@ -99,6 +103,8 @@ async def run_pipeline(record: FileRecord) -> None:
                 exc,
             )
 
+        return None  # success
+
     except Exception as exc:
         logger.error(
             "Pipeline failed for %s (%s): %s",
@@ -113,13 +119,14 @@ async def run_pipeline(record: FileRecord) -> None:
             db_record.processed_at = _utcnow()
             session.add(db_record)
             session.commit()
+        return str(exc)
 
 
-async def process_pending_files() -> int:
+async def process_pending_files() -> dict:
     """Query all pending FileRecords and run the pipeline on each sequentially.
 
     Returns:
-        The number of files attempted (regardless of outcome).
+        Dict with keys: attempted, succeeded, failed, errors (list of {filename, error}).
     """
     with get_session() as session:
         statement = select(FileRecord).where(FileRecord.status == "pending")
@@ -128,10 +135,18 @@ async def process_pending_files() -> int:
     count = len(pending)
     if count == 0:
         logger.info("No pending files to process.")
-        return 0
+        return {"attempted": 0, "succeeded": 0, "failed": 0, "errors": []}
 
     logger.info("Processing %d pending file(s).", count)
+    succeeded = 0
+    failed = 0
+    errors: list = []
     for record in pending:
-        await run_pipeline(record)
+        error = await run_pipeline(record)
+        if error is None:
+            succeeded += 1
+        else:
+            failed += 1
+            errors.append({"filename": record.filename, "error": error})
 
-    return count
+    return {"attempted": count, "succeeded": succeeded, "failed": failed, "errors": errors}

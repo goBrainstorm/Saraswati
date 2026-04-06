@@ -68,7 +68,7 @@ async def upload_file(file: UploadFile) -> FileRecord:
 
         record = FileRecord(
             id=record_id,
-            filename=original_name,
+            filename=safe_name,
             sha256=sha256,
             status="pending",
             uploaded_at=now,

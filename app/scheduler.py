@@ -21,8 +21,11 @@ async def pipeline_job() -> None:
     from app.services.cache import write_recent_cache
 
     logger.info("pipeline_job starting.")
-    count = await process_pending_files()
-    logger.info("pipeline_job processed %d file(s).", count)
+    result = await process_pending_files()
+    logger.info(
+        "pipeline_job: %d attempted, %d succeeded, %d failed.",
+        result["attempted"], result["succeeded"], result["failed"],
+    )
     cache_count = await write_recent_cache()
     logger.info("Cache refreshed: %d entries in recent.json.", cache_count)
 

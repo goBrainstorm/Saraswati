@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
 from app.database import create_db_and_tables
-from app.routes import process, status, upload
+from app.routes import entries, process, prompts, status, upload
 from app.scheduler import start_scheduler, stop_scheduler
 
 # ---------------------------------------------------------------------------
@@ -56,7 +56,7 @@ async def lifespan(app: FastAPI):
 # ---------------------------------------------------------------------------
 app = FastAPI(
     title="Personal Knowledge Base",
-    description="Self-hosted audio ingestion and knowledge pipeline — Phase 1",
+    description="Self-hosted audio ingestion and knowledge pipeline — Phase 2",
     version="0.1.0",
     lifespan=lifespan,
 )
@@ -66,7 +66,9 @@ app = FastAPI(
 # ---------------------------------------------------------------------------
 app.include_router(upload.router)
 app.include_router(status.router)
+app.include_router(entries.router)
 app.include_router(process.router)
+app.include_router(prompts.router)
 
 
 # ---------------------------------------------------------------------------

@@ -50,6 +50,7 @@ async def entries_table(request: Request) -> HTMLResponse:
 
         entries = [
             {
+                "id": str(e.id),
                 "file_id": e.file_id,
                 "filename": filenames.get(e.file_id),
                 "language": e.language,

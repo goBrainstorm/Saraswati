@@ -22,6 +22,60 @@
     <tr id="ed-{{ loop.index }}" style="display:none;">
       <td colspan="5" style="padding:0 0.75rem 0.75rem;">
         <div class="entry-detail">
+          <div class="detail-section" style="border-bottom:1px solid var(--border); padding-bottom:0.75rem; margin-bottom:0.75rem; display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center;">
+            <span style="font-size:0.72rem; text-transform:uppercase; letter-spacing:0.06em; color:var(--muted); margin-right:0.25rem;">Actions:</span>
+            <button
+              class="secondary"
+              style="padding:0.25rem 0.6rem; font-size:0.75rem; border-color:var(--danger); color:var(--danger);"
+              hx-delete="/api/entries/{{ e.id }}"
+              hx-target="this"
+              hx-swap="none"
+              hx-on::after-request="if(event.detail.successful) htmx.trigger('#entries-panel', 'load')"
+              hx-confirm="Delete this entire entry? The file will be reset to pending."
+            >Delete Entry</button>
+            <button
+              class="secondary"
+              style="padding:0.25rem 0.6rem; font-size:0.75rem; border-color:var(--danger); color:var(--danger);"
+              hx-delete="/api/entries/{{ e.id }}/transcription"
+              hx-target="this"
+              hx-swap="none"
+              hx-on::after-request="if(event.detail.successful) htmx.trigger('#entries-panel', 'load')"
+              hx-confirm="Deleting the transcription removes the entire entry and resets the file to pending. Continue?"
+            >Delete Transcription</button>
+            {% if e.translation and e.translation != e.transcription %}
+            <button
+              class="secondary"
+              style="padding:0.25rem 0.6rem; font-size:0.75rem;"
+              hx-delete="/api/entries/{{ e.id }}/translation"
+              hx-target="this"
+              hx-swap="none"
+              hx-on::after-request="if(event.detail.successful) htmx.trigger('#entries-panel', 'load')"
+              hx-confirm="Clear translation? The file will be re-queued for translation."
+            >Clear Translation</button>
+            {% endif %}
+            {% if e.summary %}
+            <button
+              class="secondary"
+              style="padding:0.25rem 0.6rem; font-size:0.75rem;"
+              hx-delete="/api/entries/{{ e.id }}/summary"
+              hx-target="this"
+              hx-swap="none"
+              hx-on::after-request="if(event.detail.successful) htmx.trigger('#entries-panel', 'load')"
+              hx-confirm="Clear summary? The file will be re-queued for summarization."
+            >Clear Summary</button>
+            {% endif %}
+            {% if e.extracted_json %}
+            <button
+              class="secondary"
+              style="padding:0.25rem 0.6rem; font-size:0.75rem;"
+              hx-delete="/api/entries/{{ e.id }}/extracted_json"
+              hx-target="this"
+              hx-swap="none"
+              hx-on::after-request="if(event.detail.successful) htmx.trigger('#entries-panel', 'load')"
+              hx-confirm="Clear extracted JSON? The file will be re-queued for extraction."
+            >Clear Extracted JSON</button>
+            {% endif %}
+          </div>
           {% if e.transcription %}
           <div class="detail-section">
             <strong>Transcription</strong>

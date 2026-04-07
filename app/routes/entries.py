@@ -1,6 +1,7 @@
 from typing import List
+from uuid import UUID
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request, Response
 from fastapi.responses import HTMLResponse
 from sqlmodel import select
 
@@ -66,3 +67,84 @@ async def entries_table(request: Request) -> HTMLResponse:
         "partials/entries_table.html",
         {"entries": entries},
     )
+
+
+@router.get("/entries", response_class=HTMLResponse, include_in_schema=False)
+async def entries_page(request: Request) -> HTMLResponse:
+    """Serve the entries management page."""
+    return templates.TemplateResponse(request, "entries.html", {"active_page": "entries"})
+
+
+@router.delete("/api/entries/{entry_id}")
+async def delete_entry(entry_id: UUID) -> Response:
+    """Delete an entire Entry row."""
+    with get_session() as session:
+        entry = session.get(Entry, entry_id)
+        if not entry:
+            raise HTTPException(status_code=404, detail="Entry not found")
+        session.delete(entry)
+        session.commit()
+    return Response(status_code=200)
+
+
+@router.delete("/api/entries/{entry_id}/transcription")
+async def delete_entry_transcription(entry_id: UUID) -> Response:
+    """Delete an entire Entry row (transcription is the base field)."""
+    with get_session() as session:
+        entry = session.get(Entry, entry_id)
+        if not entry:
+            raise HTTPException(status_code=404, detail="Entry not found")
+        session.delete(entry)
+        session.commit()
+    return Response(status_code=200)
+
+
+@router.delete("/api/entries/{entry_id}/translation")
+async def delete_entry_translation(entry_id: UUID) -> Response:
+    """Null the translation field and revert FileRecord status to 'transcribed'."""
+    with get_session() as session:
+        entry = session.get(Entry, entry_id)
+        if not entry:
+            raise HTTPException(status_code=404, detail="Entry not found")
+        entry.translation = None
+        session.add(entry)
+        record = session.get(FileRecord, entry.file_id)
+        if record:
+            record.status = "transcribed"
+            session.add(record)
+        session.commit()
+    return Response(status_code=200)
+
+
+@router.delete("/api/entries/{entry_id}/summary")
+async def delete_entry_summary(entry_id: UUID) -> Response:
+    """Null the summary field and revert FileRecord status to 'translated'."""
+    with get_session() as session:
+        entry = session.get(Entry, entry_id)
+        if not entry:
+            raise HTTPException(status_code=404, detail="Entry not found")
+        entry.summary = None
+        session.add(entry)
+        record = session.get(FileRecord, entry.file_id)
+        if record:
+            record.status = "translated"
+            session.add(record)
+        session.commit()
+    return Response(status_code=200)
+
+
+@router.delete("/api/entries/{entry_id}/extracted_json")
+async def delete_entry_extracted_json(entry_id: UUID) -> Response:
+    """Null the extracted_json field and revert FileRecord status to 'summarized'."""
+    with get_session() as session:
+        entry = session.get(Entry, entry_id)
+        if not entry:
+            raise HTTPException(status_code=404, detail="Entry not found")
+        entry.extracted_json = None
+        session.add(entry)
+        record = session.get(FileRecord, entry.file_id)
+        if record:
+            record.status = "summarized"
+            session.add(record)
+        session.commit()
+    return Response(status_code=200)

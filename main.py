@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
 from app.database import create_db_and_tables
-from app.routes import entries, models_config as models_config_route, process, prompts, status, upload
+from app.routes import entries, models_config as models_config_route, process, prompts, settings as settings_route, status, upload
 from app.scheduler import start_scheduler, stop_scheduler
 from app.services.model_config import seed_model_configs
 

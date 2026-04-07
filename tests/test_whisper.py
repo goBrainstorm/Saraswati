@@ -7,10 +7,11 @@ ffmpeg is not installed.
 
 import shutil
 import subprocess
+from types import SimpleNamespace
 
 import pytest
 
-from app.services.whisper_service import _preprocess_audio, transcribe
+from app.services.whisper_service import _preprocess_audio, _transcribe_sync, transcribe
 
 
 # ---------------------------------------------------------------------------
@@ -57,3 +58,30 @@ def test_preprocess_raises_for_ffmpeg_failure(tmp_path, monkeypatch):
 
     with pytest.raises(subprocess.CalledProcessError):
         _preprocess_audio(str(bad_file))
+
+
+# ---------------------------------------------------------------------------
+# 4. _transcribe_sync forwards configured batch size to faster-whisper
+# ---------------------------------------------------------------------------
+
+def test_transcribe_sync_uses_configured_batch_size(tmp_path, monkeypatch):
+    audio_file = tmp_path / "sample.mp3"
+    audio_file.write_bytes(b"FAKE_AUDIO_DATA")
+
+    captured_kwargs = {}
+
+    class _FakeModel:
+        def transcribe(self, path, **kwargs):
+            captured_kwargs.update(kwargs)
+            assert path == str(audio_file)
+            return [SimpleNamespace(text="hello"), SimpleNamespace(text="world")], SimpleNamespace(language="en")
+
+    monkeypatch.setattr("app.services.whisper_service._preprocess_audio", lambda p: (p, False))
+    monkeypatch.setattr("app.services.whisper_service._get_model", lambda: _FakeModel())
+    monkeypatch.setattr("app.services.whisper_service.settings.whisper_batch_size", 8, raising=False)
+
+    text, lang = _transcribe_sync(str(audio_file))
+
+    assert text == "hello world"
+    assert lang == "en"
+    assert captured_kwargs["batch_size"] == 8

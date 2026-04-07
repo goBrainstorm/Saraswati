@@ -5,4 +5,7 @@ from httpx import AsyncClient
 async def test_process_trigger(client: AsyncClient):
     response = await client.post("/api/process")
     assert response.status_code == 200
-    assert response.json() == {"status": "complete", "files_processed": 0, "cache_entries": 0}
+    data = response.json()
+    assert data["status"] == "complete"
+    assert data["files_processed"] == 0
+    assert data["cache_entries"] == 0

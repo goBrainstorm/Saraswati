@@ -30,6 +30,7 @@ class Settings(BaseSettings):
 
     # Whisper (Phase 2)
     whisper_model: str = Field(default="large-v3", alias="WHISPER_MODEL")
+    whisper_batch_size: int = Field(default=8, alias="WHISPER_BATCH_SIZE", ge=1)
     denoise_max_mb: float = Field(default=100.0, alias="DENOISE_MAX_MB")
 
     # Qdrant (Phase 3)

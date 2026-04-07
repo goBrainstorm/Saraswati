@@ -37,9 +37,10 @@ def _get_model():
             device = "cpu"
 
         logger.info(
-            "Loading Whisper model '%s' on device='%s' compute_type='int8'.",
+            "Loading Whisper model '%s' on device='%s' compute_type='int8' batch_size=%d.",
             desired,
             device,
+            settings.whisper_batch_size,
         )
 
         local_files_only = False
@@ -137,6 +138,7 @@ def _transcribe_sync(local_path: str) -> tuple[str, str]:
         model = _get_model()
         segments, info = model.transcribe(
             preprocessed_path,
+            batch_size=settings.whisper_batch_size,
             beam_size=5,
             vad_filter=True,
             vad_parameters={"min_silence_duration_ms": 500},

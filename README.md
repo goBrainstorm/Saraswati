@@ -44,6 +44,7 @@ Key settings:
 | `LOCAL_RETENTION_DAYS` | `7` | Days before local files are eligible for cleanup |
 | `SCHEDULE_CRON` | `0 3 * * *` | When the pipeline job runs (daily at 03:00) |
 | `NEXTCLOUD_URL` | _(empty)_ | Leave blank to disable Nextcloud archiving |
+| `WHISPER_BATCH_SIZE` | `8` | faster-whisper inference batching size (does not parallelize multiple files) |
 
 ### 3. Start the server
 

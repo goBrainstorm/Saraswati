@@ -11,6 +11,7 @@ from types import SimpleNamespace
 
 import pytest
 
+import app.services.whisper_service as whisper_service
 from app.services.whisper_service import _preprocess_audio, _transcribe_sync, transcribe
 
 
@@ -61,10 +62,10 @@ def test_preprocess_raises_for_ffmpeg_failure(tmp_path, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# 4. _transcribe_sync forwards configured batch size to faster-whisper
+# 4. _transcribe_sync passes VAD and beam options to faster-whisper
 # ---------------------------------------------------------------------------
 
-def test_transcribe_sync_uses_configured_batch_size(tmp_path, monkeypatch):
+def test_transcribe_sync_transcribe_kwargs(tmp_path, monkeypatch):
     audio_file = tmp_path / "sample.mp3"
     audio_file.write_bytes(b"FAKE_AUDIO_DATA")
 
@@ -78,10 +79,72 @@ def test_transcribe_sync_uses_configured_batch_size(tmp_path, monkeypatch):
 
     monkeypatch.setattr("app.services.whisper_service._preprocess_audio", lambda p: (p, False))
     monkeypatch.setattr("app.services.whisper_service._get_model", lambda: _FakeModel())
-    monkeypatch.setattr("app.services.whisper_service.settings.whisper_batch_size", 8, raising=False)
 
     text, lang = _transcribe_sync(str(audio_file))
 
     assert text == "hello world"
     assert lang == "en"
-    assert captured_kwargs["batch_size"] == 8
+    assert captured_kwargs["beam_size"] == 5
+    assert captured_kwargs["vad_filter"] is True
+    assert captured_kwargs["vad_parameters"] == {"min_silence_duration_ms": 500}
+
+
+# ---------------------------------------------------------------------------
+# 5. auto + missing CUDA libs: one GPU failure then CPU retry succeeds
+# ---------------------------------------------------------------------------
+
+
+def test_transcribe_sync_falls_back_to_cpu_on_cublas_error(tmp_path, monkeypatch):
+    audio_file = tmp_path / "sample.mp3"
+    audio_file.write_bytes(b"FAKE_AUDIO_DATA")
+
+    monkeypatch.setattr(whisper_service.settings, "whisper_device", "auto")
+    monkeypatch.setattr(whisper_service, "_whisper_gpu_broken", False)
+    monkeypatch.setattr(whisper_service, "_model", None)
+    monkeypatch.setattr(whisper_service, "_current_model_name", None)
+    monkeypatch.setattr(whisper_service, "_resolve_whisper_device", lambda: "cuda")
+
+    n = {"get_model": 0}
+
+    class _BadGpu:
+        def transcribe(self, path, **kwargs):
+            raise RuntimeError(
+                "Library libcublas.so.12 is not found or cannot be loaded"
+            )
+
+    class _OkCpu:
+        def transcribe(self, path, **kwargs):
+            return [SimpleNamespace(text="ok")], SimpleNamespace(language="pl")
+
+    def fake_get_model():
+        n["get_model"] += 1
+        return _BadGpu() if n["get_model"] == 1 else _OkCpu()
+
+    monkeypatch.setattr(whisper_service, "_preprocess_audio", lambda p: (p, False))
+    monkeypatch.setattr(whisper_service, "_get_model", fake_get_model)
+
+    text, lang = whisper_service._transcribe_sync(str(audio_file))
+
+    assert text == "ok"
+    assert lang == "pl"
+    assert n["get_model"] == 2
+    assert whisper_service._whisper_gpu_broken is True
+
+
+def test_transcribe_sync_no_cpu_fallback_when_whisper_device_cuda(tmp_path, monkeypatch):
+    audio_file = tmp_path / "sample.mp3"
+    audio_file.write_bytes(b"FAKE_AUDIO_DATA")
+
+    monkeypatch.setattr(whisper_service.settings, "whisper_device", "cuda")
+
+    class _BadGpu:
+        def transcribe(self, path, **kwargs):
+            raise RuntimeError(
+                "Library libcublas.so.12 is not found or cannot be loaded"
+            )
+
+    monkeypatch.setattr(whisper_service, "_preprocess_audio", lambda p: (p, False))
+    monkeypatch.setattr(whisper_service, "_get_model", lambda: _BadGpu())
+
+    with pytest.raises(RuntimeError, match="libcublas"):
+        whisper_service._transcribe_sync(str(audio_file))

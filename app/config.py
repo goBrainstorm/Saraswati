@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic_settings import BaseSettings
 from pydantic import Field
 
@@ -30,6 +32,10 @@ class Settings(BaseSettings):
 
     # Whisper (Phase 2)
     whisper_model: str = Field(default="large-v3", alias="WHISPER_MODEL")
+    whisper_device: Literal["auto", "cuda", "cpu"] = Field(
+        default="auto",
+        alias="WHISPER_DEVICE",
+    )
     whisper_batch_size: int = Field(default=8, alias="WHISPER_BATCH_SIZE", ge=1)
     denoise_max_mb: float = Field(default=100.0, alias="DENOISE_MAX_MB")
 

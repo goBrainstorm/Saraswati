@@ -14,6 +14,36 @@ logger = logging.getLogger(__name__)
 
 _model: Optional[object] = None  # WhisperModel, typed as object to avoid import at module level
 _current_model_name: Optional[str] = None
+# Set True after a ctranslate2 GPU RuntimeError so "auto" stops selecting CUDA.
+_whisper_gpu_broken: bool = False
+
+
+def _is_likely_missing_gpu_runtime(exc: BaseException) -> bool:
+    """True when faster-whisper/ctranslate2 failed due to missing CUDA user-space libs."""
+    msg = str(exc).lower()
+    if "libcublas" in msg or "libcudnn" in msg:
+        return True
+    if "cannot be loaded" in msg and ("cuda" in msg or "nvidia" in msg):
+        return True
+    return False
+
+
+def _resolve_whisper_device() -> str:
+    """Pick cuda vs cpu from settings and prior GPU failures."""
+    mode = settings.whisper_device
+    if mode == "cpu":
+        return "cpu"
+    if mode == "cuda":
+        return "cuda"
+    # auto
+    if _whisper_gpu_broken:
+        return "cpu"
+    try:
+        import torch
+
+        return "cuda" if torch.cuda.is_available() else "cpu"
+    except ImportError:
+        return "cpu"
 
 
 def _get_model():
@@ -30,17 +60,12 @@ def _get_model():
     if _model is None or _current_model_name != desired:
         from faster_whisper import WhisperModel
 
-        try:
-            import torch
-            device = "cuda" if torch.cuda.is_available() else "cpu"
-        except ImportError:
-            device = "cpu"
+        device = _resolve_whisper_device()
 
         logger.info(
-            "Loading Whisper model '%s' on device='%s' compute_type='int8' batch_size=%d.",
+            "Loading Whisper model '%s' on device='%s' compute_type='int8'.",
             desired,
             device,
-            settings.whisper_batch_size,
         )
 
         local_files_only = False
@@ -133,16 +158,41 @@ def _transcribe_sync(local_path: str) -> tuple[str, str]:
     Called inside asyncio.get_event_loop().run_in_executor().
     Cleans up any temp file before returning.
     """
+    global _model, _current_model_name, _whisper_gpu_broken
     preprocessed_path, is_temp = _preprocess_audio(local_path)
     try:
-        model = _get_model()
-        segments, info = model.transcribe(
-            preprocessed_path,
-            batch_size=settings.whisper_batch_size,
-            beam_size=5,
-            vad_filter=True,
-            vad_parameters={"min_silence_duration_ms": 500},
-        )
+        try:
+            model = _get_model()
+            segments, info = model.transcribe(
+                preprocessed_path,
+                beam_size=5,
+                vad_filter=True,
+                vad_parameters={"min_silence_duration_ms": 500},
+            )
+        except RuntimeError as exc:
+            if (
+                settings.whisper_device == "auto"
+                and not _whisper_gpu_broken
+                and _is_likely_missing_gpu_runtime(exc)
+                and _resolve_whisper_device() == "cuda"
+            ):
+                logger.warning(
+                    "Whisper GPU inference failed (%s). Reloading model on CPU. "
+                    "Install CUDA 12.x cuBLAS or set WHISPER_DEVICE=cpu to skip GPU.",
+                    exc,
+                )
+                _whisper_gpu_broken = True
+                _model = None
+                _current_model_name = None
+                model = _get_model()
+                segments, info = model.transcribe(
+                    preprocessed_path,
+                    beam_size=5,
+                    vad_filter=True,
+                    vad_parameters={"min_silence_duration_ms": 500},
+                )
+            else:
+                raise
         text = " ".join(seg.text.strip() for seg in segments).strip()
         lang = info.language
         logger.info(

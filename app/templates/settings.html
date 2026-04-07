@@ -1,0 +1,558 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Settings — Knowledge Base</title>
+  <script src="https://unpkg.com/htmx.org@2.0.4" integrity="sha384-HGfztofotfshcF7+8n44JQL2oJmowVChPTg48S+jvZoztPfvwD79OC/LTtG6dMp+" crossorigin="anonymous"></script>
+  <style>
+    /* ------------------------------------------------------------------ */
+    /* Design tokens                                                        */
+    /* ------------------------------------------------------------------ */
+    :root {
+      --bg:        #0f1117;
+      --surface:   #1a1d27;
+      --border:    #2a2d3a;
+      --accent:    #5b8af5;
+      --accent-hov:#7aa3ff;
+      --text:      #e2e6f0;
+      --muted:     #7a7f9a;
+      --danger:    #e05c5c;
+      --success:   #4caf82;
+      --warning:   #e0a84a;
+      --info:      #5b8af5;
+      --radius:    8px;
+      --font:      'Segoe UI', system-ui, -apple-system, sans-serif;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Reset + base                                                         */
+    /* ------------------------------------------------------------------ */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 15px;
+      line-height: 1.6;
+      min-height: 100vh;
+      padding: 2rem 1rem;
+    }
+
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { color: var(--accent-hov); }
+
+    /* ------------------------------------------------------------------ */
+    /* Layout                                                              */
+    /* ------------------------------------------------------------------ */
+    .container {
+      max-width: 960px;
+      margin: 0 auto;
+    }
+
+    header {
+      margin-bottom: 2.5rem;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 1rem;
+    }
+
+    header h1 {
+      font-size: 1.6rem;
+      font-weight: 600;
+      letter-spacing: -0.02em;
+    }
+
+    header p {
+      color: var(--muted);
+      margin-top: 0.25rem;
+      font-size: 0.9rem;
+    }
+
+    section {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1.5rem;
+      margin-bottom: 1.5rem;
+    }
+
+    section h2 {
+      font-size: 1.05rem;
+      font-weight: 600;
+      margin-bottom: 1rem;
+      color: var(--accent);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      font-size: 0.8rem;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Upload area                                                          */
+    /* ------------------------------------------------------------------ */
+    .upload-area {
+      border: 2px dashed var(--border);
+      border-radius: var(--radius);
+      padding: 2.5rem 1.5rem;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color 0.2s, background 0.2s;
+      position: relative;
+    }
+
+    .upload-area:hover,
+    .upload-area.drag-over {
+      border-color: var(--accent);
+      background: rgba(91, 138, 245, 0.05);
+    }
+
+    .upload-area p {
+      color: var(--muted);
+      margin-bottom: 1rem;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Buttons                                                             */
+    /* ------------------------------------------------------------------ */
+    button, .btn {
+      display: inline-block;
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: var(--radius);
+      padding: 0.5rem 1.2rem;
+      font-size: 0.9rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 0.15s, transform 0.1s;
+      font-family: inherit;
+    }
+
+    button:hover, .btn:hover { background: var(--accent-hov); }
+    button:active, .btn:active { transform: scale(0.97); }
+    button.secondary {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--text);
+    }
+    button.secondary:hover { border-color: var(--accent); color: var(--accent); }
+
+    /* ------------------------------------------------------------------ */
+    /* Response / feedback boxes                                           */
+    /* ------------------------------------------------------------------ */
+    #upload-result, #process-result {
+      margin-top: 1rem;
+      padding: 0.75rem 1rem;
+      border-radius: var(--radius);
+      font-size: 0.875rem;
+      display: none;
+    }
+
+    #upload-result:not(:empty), #process-result:not(:empty) { display: block; }
+
+    .result-ok  { background: rgba(76,175,130,0.12); border: 1px solid var(--success); color: var(--success); }
+    .result-err { background: rgba(224,92,92,0.12);  border: 1px solid var(--danger);  color: var(--danger);  }
+    .result-info{ background: rgba(91,138,245,0.1);  border: 1px solid var(--accent);  color: var(--accent);  }
+
+    /* ------------------------------------------------------------------ */
+    /* Status table                                                        */
+    /* ------------------------------------------------------------------ */
+    #status-panel {
+      overflow-x: auto;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.875rem;
+    }
+
+    th {
+      text-align: left;
+      padding: 0.5rem 0.75rem;
+      color: var(--muted);
+      font-weight: 500;
+      border-bottom: 1px solid var(--border);
+      white-space: nowrap;
+    }
+
+    td {
+      padding: 0.6rem 0.75rem;
+      border-bottom: 1px solid var(--border);
+      vertical-align: middle;
+    }
+
+    tr:last-child td { border-bottom: none; }
+
+    tr:hover td { background: rgba(255,255,255,0.02); }
+
+    /* ------------------------------------------------------------------ */
+    /* Status badges                                                       */
+    /* ------------------------------------------------------------------ */
+    .badge {
+      display: inline-block;
+      padding: 0.15rem 0.55rem;
+      border-radius: 20px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .badge-pending      { background: rgba(224,168,74,0.15); color: var(--warning); }
+    .badge-processing   { background: rgba(91,138,245,0.15); color: var(--info);    }
+    .badge-done         { background: rgba(76,175,130,0.15); color: var(--success); }
+    .badge-failed       { background: rgba(224,92,92,0.15);  color: var(--danger);  }
+    .badge-transcribed  { background: #b45309; color: #fff; }
+    .badge-translated   { background: #0369a1; color: #fff; }
+    .badge-summarized   { background: #7c3aed; color: #fff; }
+    .badge-uploading  { background: rgba(91,138,245,0.15); color: var(--info);    }
+    .badge-duplicate  { background: rgba(224,168,74,0.15);  color: var(--warning); }
+
+    /* Upload queue */
+    .queue-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0.5rem 0.75rem;
+      border-bottom: 1px solid var(--border);
+      gap: 1rem;
+    }
+    .queue-row:last-child { border-bottom: none; }
+    .queue-filename {
+      flex: 1;
+      min-width: 0;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      font-size: 0.875rem;
+    }
+    #upload-result.queue-mode {
+      padding: 0;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      max-height: 300px;
+      overflow-y: auto;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Process trigger row                                                 */
+    /* ------------------------------------------------------------------ */
+    .trigger-row {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      flex-wrap: wrap;
+    }
+
+    .trigger-row p {
+      color: var(--muted);
+      font-size: 0.875rem;
+      flex: 1 1 200px;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* HTMX loading indicator                                              */
+    /* ------------------------------------------------------------------ */
+    .htmx-indicator { opacity: 0; transition: opacity 0.2s; }
+    .htmx-request .htmx-indicator { opacity: 1; }
+
+    .spinner {
+      display: inline-block;
+      width: 14px;
+      height: 14px;
+      border: 2px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      vertical-align: middle;
+      margin-left: 0.4rem;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ------------------------------------------------------------------ */
+    /* Entry detail rows                                                   */
+    /* ------------------------------------------------------------------ */
+    .entry-detail {
+      background: var(--bg);
+      border-radius: var(--radius);
+      padding: 0.75rem;
+    }
+
+    .detail-section {
+      margin-bottom: 0.75rem;
+    }
+
+    .detail-section:last-child {
+      margin-bottom: 0;
+    }
+
+    .detail-section strong {
+      display: block;
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+      margin-bottom: 0.3rem;
+    }
+
+    .detail-text {
+      margin: 0;
+      padding: 0.5rem 0.75rem;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      font-family: monospace;
+      font-size: 0.8rem;
+      white-space: pre-wrap;
+      word-break: break-word;
+      max-height: 180px;
+      overflow-y: auto;
+      color: var(--text);
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Footer                                                              */
+    /* ------------------------------------------------------------------ */
+    footer {
+      margin-top: 2.5rem;
+      text-align: center;
+      color: var(--muted);
+      font-size: 0.8rem;
+      border-top: 1px solid var(--border);
+      padding-top: 1rem;
+    }
+
+    /* Extra settings-specific styles */
+    .settings-grid { display: grid; gap: 1rem; }
+    .model-row { display: grid; grid-template-columns: 140px 1fr 1fr auto; gap: 0.75rem; align-items: end; padding: 0.75rem 0; border-bottom: 1px solid var(--border); }
+    .model-row:last-child { border-bottom: none; }
+    .model-row label { font-size: 0.8rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; display: block; margin-bottom: 0.3rem; }
+    .model-row input, .model-row select { width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius); padding: 0.45rem 0.65rem; font-size: 0.875rem; font-family: inherit; }
+    .model-row input:focus, .model-row select:focus { outline: none; border-color: var(--accent); }
+    .step-label { font-weight: 600; font-size: 0.875rem; padding-top: 0.4rem; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    {% include "partials/nav.html" %}
+
+    <!-- Model Configuration -->
+    <section>
+      <h2>Model Configuration</h2>
+      <p style="color:var(--muted); font-size:0.875rem; margin-bottom:1.5rem;">
+        Configure which models are used for each pipeline step. Changes take effect on the next pipeline run.
+      </p>
+      <div id="model-config-container">
+        <p style="color:var(--muted); font-size:0.875rem;">Loading...</p>
+      </div>
+    </section>
+
+    <!-- Prompts Configuration -->
+    <section id="prompts-section">
+      <h2>Prompt Configuration</h2>
+      <p style="color:var(--muted); font-size:0.875rem; margin-bottom:1.5rem;">
+        Edit the prompts used by the LLM pipeline. Changes take effect on the next pipeline run.
+      </p>
+      <div id="prompts-container">
+        <p style="color:var(--muted); font-size:0.875rem;">Loading...</p>
+      </div>
+    </section>
+
+    <footer>Knowledge Base &mdash; Phase 2 &mdash; self-hosted</footer>
+  </div>
+
+  <script>
+    // ----------------------------------------------------------------
+    // Prompts (moved from index.html verbatim)
+    // ----------------------------------------------------------------
+    (async function loadPrompts() {
+      const container = document.getElementById('prompts-container');
+      if (!container) return;
+      try {
+        const resp = await fetch('/api/prompts');
+        const prompts = await resp.json();
+        const labels = {
+          translate_system: 'Translate — System',
+          translate_user:   'Translate — User template',
+          summarize_system: 'Summarize — System',
+          summarize_user:   'Summarize — User template',
+          extract_system:   'Extract — System',
+          extract_user:     'Extract — User template',
+        };
+        container.innerHTML = Object.entries(prompts).filter(([key]) => key in labels).map(([key, val]) => `
+          <div style="margin-bottom:1.5rem;">
+            <label style="display:block; font-size:0.8rem; color:var(--muted); margin-bottom:0.4rem; text-transform:uppercase; letter-spacing:0.05em;">
+              ${labels[key]}
+            </label>
+            <textarea id="prompt-${key}" rows="4" style="width:100%; background:var(--bg); color:var(--text); border:1px solid var(--border); border-radius:var(--radius); padding:0.6rem; font-family:monospace; font-size:0.8rem; resize:vertical;">${val.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</textarea>
+            <button data-prompt-key="${key}" class="secondary prompt-save-btn" style="margin-top:0.4rem; font-size:0.8rem; padding:0.3rem 0.8rem;">Save</button>
+            <span id="prompt-msg-${key}" style="font-size:0.8rem; margin-left:0.75rem; color:var(--muted);"></span>
+          </div>
+        `).join('');
+        container.querySelectorAll('.prompt-save-btn').forEach(btn => {
+          btn.addEventListener('click', () => savePrompt(btn.dataset.promptKey));
+        });
+      } catch (e) {
+        container.innerHTML = '<p style="color:var(--danger)">Failed to load prompts.</p>';
+      }
+    })();
+
+    async function savePrompt(key) {
+      const textarea = document.getElementById('prompt-' + key);
+      const msgEl = document.getElementById('prompt-msg-' + key);
+      if (!textarea) return;
+      msgEl.textContent = 'Saving\u2026';
+      msgEl.style.color = 'var(--muted)';
+      try {
+        const resp = await fetch('/api/prompts/' + key, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: textarea.value }),
+        });
+        if (resp.ok) {
+          msgEl.textContent = 'Saved.';
+          msgEl.style.color = 'var(--success)';
+        } else {
+          msgEl.textContent = 'Error: ' + resp.status;
+          msgEl.style.color = 'var(--danger)';
+        }
+      } catch {
+        msgEl.textContent = 'Network error.';
+        msgEl.style.color = 'var(--danger)';
+      }
+    }
+
+    // ----------------------------------------------------------------
+    // Model configuration
+    // ----------------------------------------------------------------
+    const WHISPER_MODELS = ['tiny','tiny.en','base','base.en','small','small.en','medium','medium.en','large-v1','large-v2','large-v3','large'];
+
+    async function loadModelConfig() {
+      const container = document.getElementById('model-config-container');
+      try {
+        const resp = await fetch('/api/models/config');
+        const configs = await resp.json();
+        // Build rows
+        const rows = configs.map(cfg => buildModelRow(cfg));
+        container.innerHTML = rows.join('');
+        // Attach save handlers
+        configs.forEach(cfg => {
+          const saveBtn = document.getElementById('save-' + cfg.step);
+          if (saveBtn) saveBtn.addEventListener('click', () => saveModelConfig(cfg.step));
+          if (cfg.step !== 'transcribe') {
+            const refreshBtn = document.getElementById('refresh-' + cfg.step);
+            if (refreshBtn) refreshBtn.addEventListener('click', () => refreshModels(cfg.step));
+          }
+        });
+      } catch(e) {
+        container.innerHTML = '<p style="color:var(--danger)">Failed to load model configuration.</p>';
+      }
+    }
+
+    function buildModelRow(cfg) {
+      const isTranscribe = cfg.step === 'transcribe';
+      const stepLabel = cfg.step.charAt(0).toUpperCase() + cfg.step.slice(1);
+
+      if (isTranscribe) {
+        return `
+          <div class="model-row" id="row-${cfg.step}">
+            <div><span class="step-label">${stepLabel}</span></div>
+            <div>
+              <label>Model</label>
+              <select id="model-${cfg.step}">
+                ${WHISPER_MODELS.map(m => `<option value="${m}" ${m === cfg.model_name ? 'selected' : ''}>${m}</option>`).join('')}
+              </select>
+            </div>
+            <div style="grid-column:span 1;">
+              <label style="opacity:0;">URL</label>
+              <span style="font-size:0.8rem; color:var(--muted); padding-top:0.3rem; display:block;">Local (faster-whisper)</span>
+            </div>
+            <div style="display:flex; gap:0.5rem; align-items:flex-end;">
+              <button id="save-${cfg.step}" class="secondary" style="padding:0.35rem 0.8rem; font-size:0.8rem; white-space:nowrap;">Save</button>
+            </div>
+          </div>`;
+      } else {
+        return `
+          <div class="model-row" id="row-${cfg.step}">
+            <div><span class="step-label">${stepLabel}</span></div>
+            <div>
+              <label>Server URL</label>
+              <input type="text" id="url-${cfg.step}" value="${escHtml(cfg.server_url)}" placeholder="http://localhost:8080">
+            </div>
+            <div>
+              <label>Model</label>
+              <select id="model-${cfg.step}">
+                <option value="${escHtml(cfg.model_name)}" selected>${escHtml(cfg.model_name) || '(none)'}</option>
+              </select>
+            </div>
+            <div style="display:flex; gap:0.5rem; align-items:flex-end;">
+              <button id="refresh-${cfg.step}" class="secondary" style="padding:0.35rem 0.8rem; font-size:0.8rem; white-space:nowrap;" title="Fetch available models from server">&#8635;</button>
+              <button id="save-${cfg.step}" class="secondary" style="padding:0.35rem 0.8rem; font-size:0.8rem; white-space:nowrap;">Save</button>
+            </div>
+          </div>`;
+      }
+    }
+
+    function escHtml(s) {
+      return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
+    async function refreshModels(step) {
+      const urlInput = document.getElementById('url-' + step);
+      const modelSelect = document.getElementById('model-' + step);
+      const refreshBtn = document.getElementById('refresh-' + step);
+      // Temporarily save URL so refresh uses latest value
+      const currentUrl = urlInput ? urlInput.value.trim() : '';
+      if (currentUrl) {
+        // Save URL first so the available endpoint reads it
+        await fetch('/api/models/config/' + step, {
+          method: 'PUT',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({server_url: currentUrl, model_name: modelSelect ? (modelSelect.value||'') : ''}),
+        });
+      }
+      if (refreshBtn) { refreshBtn.disabled = true; refreshBtn.textContent = '\u2026'; }
+      try {
+        const resp = await fetch('/api/models/available/' + step);
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        const data = await resp.json();
+        if (modelSelect && data.models && data.models.length) {
+          const current = modelSelect.value;
+          modelSelect.innerHTML = data.models.map(m =>
+            `<option value="${escHtml(m)}" ${m === current ? 'selected' : ''}>${escHtml(m)}</option>`
+          ).join('');
+        }
+      } catch(e) {
+        alert('Could not fetch models: ' + e.message);
+      } finally {
+        if (refreshBtn) { refreshBtn.disabled = false; refreshBtn.textContent = '\u21BB'; }
+      }
+    }
+
+    async function saveModelConfig(step) {
+      const urlInput = document.getElementById('url-' + step);
+      const modelSelect = document.getElementById('model-' + step);
+      const saveBtn = document.getElementById('save-' + step);
+      const serverUrl = urlInput ? urlInput.value.trim() : '';
+      const modelName = modelSelect ? modelSelect.value : '';
+      if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Saving\u2026'; }
+      try {
+        const resp = await fetch('/api/models/config/' + step, {
+          method: 'PUT',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({server_url: serverUrl, model_name: modelName}),
+        });
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        if (saveBtn) { saveBtn.textContent = 'Saved \u2713'; setTimeout(() => { if (saveBtn) saveBtn.textContent = 'Save'; saveBtn.disabled = false; }, 2000); }
+      } catch(e) {
+        alert('Failed to save: ' + e.message);
+        if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Save'; }
+      }
+    }
+
+    loadModelConfig();
+  </script>
+</body>
+</html>

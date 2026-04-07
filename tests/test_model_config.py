@@ -1,3 +1,4 @@
+import httpx
 import pytest
 from httpx import AsyncClient
 from sqlmodel import select
@@ -5,17 +6,6 @@ from unittest.mock import AsyncMock, patch
 
 from app.models import ModelConfig
 from app.services.model_config import seed_model_configs, VALID_STEPS
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-def _seed(session):
-    """Seed model configs using the real session (patching get_session not needed
-    because conftest patches the engine — seed_model_configs uses get_session
-    which now targets the test engine)."""
-    seed_model_configs()
 
 
 # ---------------------------------------------------------------------------
@@ -106,12 +96,16 @@ async def test_available_llm_step_empty_url(client: AsyncClient, session):
 
 
 @pytest.mark.asyncio
-async def test_available_llm_step_unreachable(client: AsyncClient, session):
-    """With a non-reachable URL, available returns 502."""
+async def test_available_llm_step_unreachable(client, session):
+    from app.services.model_config import seed_model_configs
     seed_model_configs()
     await client.put(
         "/api/models/config/translate",
         json={"server_url": "http://localhost:9999", "model_name": "x"},
     )
-    response = await client.get("/api/models/available/translate")
+    with patch("app.routes.models_config.httpx.AsyncClient") as mock_cls:
+        mock_instance = AsyncMock()
+        mock_cls.return_value.__aenter__.return_value = mock_instance
+        mock_instance.get.side_effect = httpx.ConnectError("Connection refused")
+        response = await client.get("/api/models/available/translate")
     assert response.status_code == 502

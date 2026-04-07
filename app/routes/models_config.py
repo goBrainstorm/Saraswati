@@ -44,6 +44,11 @@ class ModelConfigUpdate(BaseModel):
     model_name: str
 
 
+class AvailableModelsResponse(BaseModel):
+    models: List[str]
+    cached: List[str]
+
+
 @router.get("/config")
 async def get_all_configs() -> List[ModelConfig]:
     """Return ModelConfig for all 4 pipeline steps."""
@@ -52,7 +57,7 @@ async def get_all_configs() -> List[ModelConfig]:
         try:
             configs.append(get_model_config(step))
         except ValueError:
-            pass
+            logger.warning("ModelConfig for step %r not found in DB; skipping.", step)
     return configs
 
 
@@ -68,7 +73,7 @@ async def put_config(step: str, body: ModelConfigUpdate) -> ModelConfig:
 
 
 @router.get("/available/{step}")
-async def get_available_models(step: str):
+async def get_available_models(step: str) -> AvailableModelsResponse:
     """Return available and cached models for a pipeline step."""
     if step not in VALID_STEPS:
         raise HTTPException(
@@ -77,16 +82,16 @@ async def get_available_models(step: str):
         )
 
     if step == "transcribe":
-        return {"models": _WHISPER_MODELS, "cached": _cached_whisper_models()}
+        return AvailableModelsResponse(models=_WHISPER_MODELS, cached=_cached_whisper_models())
 
     # LLM step
     try:
         config = get_model_config(step)
     except ValueError:
-        return {"models": [], "cached": []}
+        return AvailableModelsResponse(models=[], cached=[])
 
     if not config.server_url:
-        return {"models": [], "cached": []}
+        return AvailableModelsResponse(models=[], cached=[])
 
     url = config.server_url.rstrip("/") + "/v1/models"
     try:
@@ -102,4 +107,4 @@ async def get_available_models(step: str):
         )
 
     models = [item["id"] for item in data.get("data", [])]
-    return {"models": models, "cached": []}
+    return AvailableModelsResponse(models=models, cached=[])

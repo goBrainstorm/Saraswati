@@ -322,14 +322,24 @@ async def process_pending_files() -> dict:
         ).all()
         transcribed_ids = [r.id for r in transcribed]
 
-    for fid in transcribed_ids:
-        attempted_ids.add(fid)
-        error = await run_translation(fid)
-        if error:
-            errors.append({"filename": str(fid), "error": error})
-            failed += 1
-        else:
-            succeeded += 1
+    from app.services.llm import check_llm_server_ready
+
+    llm_skip = await check_llm_server_ready("translate")
+    if llm_skip:
+        logger.warning(
+            "Skipping translation for %d file(s): %s",
+            len(transcribed_ids),
+            llm_skip,
+        )
+    else:
+        for fid in transcribed_ids:
+            attempted_ids.add(fid)
+            error = await run_translation(fid)
+            if error:
+                errors.append({"filename": str(fid), "error": error})
+                failed += 1
+            else:
+                succeeded += 1
 
     with get_session() as session:
         translated = session.exec(
@@ -337,14 +347,22 @@ async def process_pending_files() -> dict:
         ).all()
         translated_ids = [r.id for r in translated]
 
-    for fid in translated_ids:
-        attempted_ids.add(fid)
-        error = await run_summarization(fid)
-        if error:
-            errors.append({"filename": str(fid), "error": error})
-            failed += 1
-        else:
-            succeeded += 1
+    llm_skip = await check_llm_server_ready("summarize")
+    if llm_skip:
+        logger.warning(
+            "Skipping summarization for %d file(s): %s",
+            len(translated_ids),
+            llm_skip,
+        )
+    else:
+        for fid in translated_ids:
+            attempted_ids.add(fid)
+            error = await run_summarization(fid)
+            if error:
+                errors.append({"filename": str(fid), "error": error})
+                failed += 1
+            else:
+                succeeded += 1
 
     with get_session() as session:
         summarized = session.exec(
@@ -352,14 +370,22 @@ async def process_pending_files() -> dict:
         ).all()
         summarized_ids = [r.id for r in summarized]
 
-    for fid in summarized_ids:
-        attempted_ids.add(fid)
-        error = await run_extraction_and_finalize(fid)
-        if error:
-            errors.append({"filename": str(fid), "error": error})
-            failed += 1
-        else:
-            succeeded += 1
+    llm_skip = await check_llm_server_ready("extract")
+    if llm_skip:
+        logger.warning(
+            "Skipping extraction/finalize for %d file(s): %s",
+            len(summarized_ids),
+            llm_skip,
+        )
+    else:
+        for fid in summarized_ids:
+            attempted_ids.add(fid)
+            error = await run_extraction_and_finalize(fid)
+            if error:
+                errors.append({"filename": str(fid), "error": error})
+                failed += 1
+            else:
+                succeeded += 1
 
     return {
         "attempted": len(attempted_ids),

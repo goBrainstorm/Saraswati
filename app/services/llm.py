@@ -15,6 +15,46 @@ logger = logging.getLogger(__name__)
 _MAX_CHARS = 32_000
 
 
+async def check_llm_server_ready(step: str) -> str | None:
+    """Return None if the OpenAI-compatible server (e.g. llama.cpp) looks usable.
+
+    Probes ``GET /v1/models`` and, when the server returns a non-empty model list,
+    ensures ``ModelConfig.model_name`` is listed so we skip whole batches instead
+    of failing every file with connection errors.
+    """
+    from app.services.model_config import get_model_config
+
+    try:
+        cfg = get_model_config(step)
+    except ValueError as exc:
+        return str(exc)
+    server_url = (cfg.server_url or "").strip()
+    if not server_url:
+        return "LLM server URL is not configured"
+    model_name = (cfg.model_name or "").strip()
+    models_url = server_url.rstrip("/") + "/v1/models"
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            response = await client.get(models_url)
+            response.raise_for_status()
+            data = response.json()
+    except Exception as exc:
+        return f"LLM server unreachable ({server_url}): {exc}"
+
+    raw = data.get("data") or [] if isinstance(data, dict) else []
+    if not isinstance(raw, list):
+        raw = []
+    ids = [item["id"] for item in raw if isinstance(item, dict) and "id" in item]
+    if ids and model_name and model_name not in ids:
+        preview = ids[:8]
+        suffix = "..." if len(ids) > 8 else ""
+        return (
+            f"Model {model_name!r} not loaded on server "
+            f"(available ids: {preview}{suffix})"
+        )
+    return None
+
+
 def _guard_text(text: str) -> str:
     if len(text) > _MAX_CHARS:
         logger.warning("Text length %d exceeds limit %d; truncating.", len(text), _MAX_CHARS)

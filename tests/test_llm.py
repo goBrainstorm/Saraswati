@@ -1,7 +1,17 @@
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import httpx
 import pytest
 
 from app.models import ModelConfig
-from app.services.llm import _guard_text, _MAX_CHARS, translate, summarize, extract
+from app.services.llm import (
+    _guard_text,
+    _MAX_CHARS,
+    check_llm_server_ready,
+    extract,
+    summarize,
+    translate,
+)
 
 
 async def test_translate_skips_english():
@@ -44,3 +54,95 @@ async def test_guard_text_truncates():
 
 async def test_guard_text_passthrough():
     assert _guard_text("hello") == "hello"
+
+
+@pytest.mark.asyncio
+async def test_check_llm_server_ready_ok(db_engine, db_session):
+    db_session.add(
+        ModelConfig(
+            step="translate",
+            server_url="http://127.0.0.1:1",
+            model_name="my-model",
+        )
+    )
+    db_session.commit()
+    mock_resp = MagicMock()
+    mock_resp.raise_for_status = MagicMock()
+    mock_resp.json = MagicMock(return_value={"data": [{"id": "my-model"}]})
+    mock_instance = AsyncMock()
+    mock_instance.get = AsyncMock(return_value=mock_resp)
+    with patch("app.services.llm.httpx.AsyncClient") as mock_cls:
+        mock_cls.return_value.__aenter__.return_value = mock_instance
+        assert await check_llm_server_ready("translate") is None
+
+
+@pytest.mark.asyncio
+async def test_check_llm_server_ready_model_not_loaded(db_engine, db_session):
+    db_session.add(
+        ModelConfig(
+            step="translate",
+            server_url="http://127.0.0.1:1",
+            model_name="wanted",
+        )
+    )
+    db_session.commit()
+    mock_resp = MagicMock()
+    mock_resp.raise_for_status = MagicMock()
+    mock_resp.json = MagicMock(return_value={"data": [{"id": "other"}]})
+    mock_instance = AsyncMock()
+    mock_instance.get = AsyncMock(return_value=mock_resp)
+    with patch("app.services.llm.httpx.AsyncClient") as mock_cls:
+        mock_cls.return_value.__aenter__.return_value = mock_instance
+        err = await check_llm_server_ready("translate")
+    assert err is not None
+    assert "not loaded" in err
+    assert "wanted" in err
+
+
+@pytest.mark.asyncio
+async def test_check_llm_server_ready_unreachable(db_engine, db_session):
+    db_session.add(
+        ModelConfig(
+            step="translate",
+            server_url="http://127.0.0.1:1",
+            model_name="m",
+        )
+    )
+    db_session.commit()
+    mock_instance = AsyncMock()
+    mock_instance.get = AsyncMock(side_effect=httpx.ConnectError("refused"))
+    with patch("app.services.llm.httpx.AsyncClient") as mock_cls:
+        mock_cls.return_value.__aenter__.return_value = mock_instance
+        err = await check_llm_server_ready("translate")
+    assert err is not None
+    assert "unreachable" in err
+
+
+@pytest.mark.asyncio
+async def test_check_llm_server_ready_empty_models_list_ok(db_engine, db_session):
+    """If /v1/models returns no ids, do not block (some servers use odd shapes)."""
+    db_session.add(
+        ModelConfig(
+            step="translate",
+            server_url="http://127.0.0.1:1",
+            model_name="m",
+        )
+    )
+    db_session.commit()
+    mock_resp = MagicMock()
+    mock_resp.raise_for_status = MagicMock()
+    mock_resp.json = MagicMock(return_value={"data": []})
+    mock_instance = AsyncMock()
+    mock_instance.get = AsyncMock(return_value=mock_resp)
+    with patch("app.services.llm.httpx.AsyncClient") as mock_cls:
+        mock_cls.return_value.__aenter__.return_value = mock_instance
+        assert await check_llm_server_ready("translate") is None
+
+
+@pytest.mark.asyncio
+async def test_check_llm_server_ready_no_server_url(db_engine, db_session):
+    db_session.add(ModelConfig(step="translate", server_url="", model_name="x"))
+    db_session.commit()
+    err = await check_llm_server_ready("translate")
+    assert err is not None
+    assert "not configured" in err

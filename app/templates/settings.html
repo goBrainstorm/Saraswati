@@ -503,19 +503,11 @@
       const urlInput = document.getElementById('url-' + step);
       const modelSelect = document.getElementById('model-' + step);
       const refreshBtn = document.getElementById('refresh-' + step);
-      // Temporarily save URL so refresh uses latest value
       const currentUrl = urlInput ? urlInput.value.trim() : '';
-      if (currentUrl) {
-        // Save URL first so the available endpoint reads it
-        await fetch('/api/models/config/' + step, {
-          method: 'PUT',
-          headers: {'Content-Type':'application/json'},
-          body: JSON.stringify({server_url: currentUrl, model_name: modelSelect ? (modelSelect.value||'') : ''}),
-        });
-      }
       if (refreshBtn) { refreshBtn.disabled = true; refreshBtn.textContent = '\u2026'; }
       try {
-        const resp = await fetch('/api/models/available/' + step);
+        const query = currentUrl ? '?server_url=' + encodeURIComponent(currentUrl) : '';
+        const resp = await fetch('/api/models/available/' + step + query);
         if (!resp.ok) throw new Error('HTTP ' + resp.status);
         const data = await resp.json();
         if (modelSelect && data.models && data.models.length) {

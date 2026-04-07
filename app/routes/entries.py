@@ -106,12 +106,14 @@ async def delete_entry_transcription(entry_id: UUID) -> Response:
 
 @router.delete("/api/entries/{entry_id}/translation")
 async def delete_entry_translation(entry_id: UUID) -> Response:
-    """Null the translation field and revert FileRecord status to 'transcribed'."""
+    """Null translation and all downstream fields; revert FileRecord status to 'transcribed'."""
     with get_session() as session:
         entry = session.get(Entry, entry_id)
         if not entry:
             raise HTTPException(status_code=404, detail="Entry not found")
         entry.translation = None
+        entry.summary = None
+        entry.extracted_json = None
         session.add(entry)
         record = session.get(FileRecord, entry.file_id)
         if record:
@@ -123,12 +125,13 @@ async def delete_entry_translation(entry_id: UUID) -> Response:
 
 @router.delete("/api/entries/{entry_id}/summary")
 async def delete_entry_summary(entry_id: UUID) -> Response:
-    """Null the summary field and revert FileRecord status to 'translated'."""
+    """Null summary and all downstream fields; revert FileRecord status to 'translated'."""
     with get_session() as session:
         entry = session.get(Entry, entry_id)
         if not entry:
             raise HTTPException(status_code=404, detail="Entry not found")
         entry.summary = None
+        entry.extracted_json = None
         session.add(entry)
         record = session.get(FileRecord, entry.file_id)
         if record:

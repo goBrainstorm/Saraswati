@@ -588,11 +588,15 @@
       const ids = Array.from(document.querySelectorAll('.row-select:checked')).map(cb => cb.value);
       if (!ids.length) return;
       try {
-        await fetch(endpoint, {
+        const resp = await fetch(endpoint, {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
           body: JSON.stringify({ids}),
         });
+        if (!resp.ok) {
+          alert('Batch action failed: HTTP ' + resp.status);
+          return;
+        }
       } finally {
         // Re-enable polling and refresh
         const panel = document.getElementById('status-panel');

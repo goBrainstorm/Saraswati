@@ -1,9 +1,9 @@
 import logging
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 import httpx
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from app.models import ModelConfig
@@ -73,8 +73,16 @@ async def put_config(step: str, body: ModelConfigUpdate) -> ModelConfig:
 
 
 @router.get("/available/{step}")
-async def get_available_models(step: str) -> AvailableModelsResponse:
-    """Return available and cached models for a pipeline step."""
+async def get_available_models(
+    step: str,
+    server_url: Optional[str] = Query(default=None),
+) -> AvailableModelsResponse:
+    """Return available and cached models for a pipeline step.
+
+    For LLM steps, ``server_url`` may be supplied as a query parameter to
+    query a URL without persisting it to the database first.  When omitted the
+    stored config value is used.
+    """
     if step not in VALID_STEPS:
         raise HTTPException(
             status_code=422,
@@ -84,16 +92,18 @@ async def get_available_models(step: str) -> AvailableModelsResponse:
     if step == "transcribe":
         return AvailableModelsResponse(models=_WHISPER_MODELS, cached=_cached_whisper_models())
 
-    # LLM step
-    try:
-        config = get_model_config(step)
-    except ValueError:
+    # LLM step — prefer query param, fall back to DB
+    if server_url is None:
+        try:
+            config = get_model_config(step)
+        except ValueError:
+            return AvailableModelsResponse(models=[], cached=[])
+        server_url = config.server_url
+
+    if not server_url:
         return AvailableModelsResponse(models=[], cached=[])
 
-    if not config.server_url:
-        return AvailableModelsResponse(models=[], cached=[])
-
-    url = config.server_url.rstrip("/") + "/v1/models"
+    url = server_url.rstrip("/") + "/v1/models"
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
             resp = await client.get(url)
@@ -103,7 +113,7 @@ async def get_available_models(step: str) -> AvailableModelsResponse:
         logger.warning("Could not reach LLM server at %s: %s", url, exc)
         raise HTTPException(
             status_code=502,
-            detail=f"Could not reach model server at {config.server_url}: {exc}",
+            detail=f"Could not reach model server at {server_url}: {exc}",
         )
 
     models = [item["id"] for item in data.get("data", [])]

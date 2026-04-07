@@ -74,6 +74,7 @@ app.include_router(entries.router)
 app.include_router(process.router)
 app.include_router(prompts.router)
 app.include_router(models_config_route.router)
+app.include_router(settings_route.router)
 
 
 # ---------------------------------------------------------------------------

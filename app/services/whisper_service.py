@@ -22,8 +22,11 @@ def _get_model():
     Runs in a thread-pool executor — do not call from async context directly.
     """
     global _model, _current_model_name
-    from app.services.model_config import get_model_config  # local import to avoid circular imports
-    desired = get_model_config("transcribe").model_name
+    try:
+        from app.services.model_config import get_model_config
+        desired = get_model_config("transcribe").model_name
+    except Exception:
+        desired = settings.whisper_model
     if _model is None or _current_model_name != desired:
         from faster_whisper import WhisperModel
 

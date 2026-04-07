@@ -66,6 +66,7 @@ def get_model_config(step: str) -> ModelConfig:
         ).first()
         if row is None:
             raise ValueError(f"No ModelConfig found for step={step!r}")
+        session.expunge(row)
         return row
 
 
@@ -87,4 +88,5 @@ def upsert_model_config(step: str, server_url: str, model_name: str) -> ModelCon
 
         session.commit()
         session.refresh(row)
+        session.expunge(row)
         return row

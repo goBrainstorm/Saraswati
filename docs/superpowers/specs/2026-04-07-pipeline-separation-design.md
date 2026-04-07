@@ -11,7 +11,7 @@ The pipeline will be restructured to run in horizontal batches rather than proce
 Instead of running `run_pipeline` for each pending file sequentially through all stages, the scheduler will:
 - **Phase A: Transcription Batch**
   - Query all files with `status="pending"`.
-  - For each, run only the transcription stage (marking them `processing` then `transcribed` or `failed`).
+  - For each, run only the transcription stage. Before transcription, the file is marked `processing`. If successful, it is marked `transcribed`. If it fails, it is marked `failed`.
 - **Phase B: LLM Translation Batch**
   - Query all files with `status="transcribed"`.
   - For each, run only the translation stage (marking them `translated`).
@@ -20,22 +20,24 @@ Instead of running `run_pipeline` for each pending file sequentially through all
   - For each, run only the summarization stage (marking them `summarized`).
 - **Phase D: LLM Extraction & Finalization Batch**
   - Query all files with `status="summarized"`.
-  - For each, run extraction, embedding, and Nextcloud upload (marking them `done`).
+  - For each, run extraction, then embedding, mark as `done`, and upload to Nextcloud. (This preserves the original ordering of side effects).
+
+*Note on `attempted` semantics:* The `attempted` count returned by `process_pending_files` will represent the unique number of files touched during the execution of the job across any batch. 
 
 ### 2. Manual Trigger for Single File
-A new endpoint `POST /api/process/{file_id}` will be added to `app/routes/process.py` (or a similar location).
+A new endpoint `POST /api/process/{file_id}` will be added to `app/routes/process.py`.
 - This endpoint will take a `file_id`.
-- It will forcefully push that specific file through the remaining LLM stages (Translation -> Summarization -> Extraction) synchronously.
-- If the file is still `pending`, it will transcribe it first, then run the LLM stages, acting as a manual override for immediate end-to-end processing.
+- It will sequentially run that specific file through whatever stages remain for it synchronously.
+- It will **not** trigger a cache refresh (`write_recent_cache()`). Cache refresh remains the responsibility of the scheduled job or the full manual `/api/process` endpoint. 
 
 ### 3. Pipeline Service Refactoring (`app/services/pipeline.py`)
-`run_pipeline(record)` currently runs all stages. It will be refactored into smaller, composable functions:
-- `run_transcription(record)`
-- `run_translation(record)`
-- `run_summarization(record)`
-- `run_extraction_and_finalize(record)`
+`run_pipeline(record)` currently runs all stages. It will be refactored into smaller, composable functions. Each function will load its own fresh `FileRecord` (and `Entry` where applicable) from the database to prevent operating on detached ORM instances.
+- `run_transcription(file_id)`
+- `run_translation(file_id)`
+- `run_summarization(file_id)`
+- `run_extraction_and_finalize(file_id)`
 
-The batch processor (`process_pending_files`) will iterate over these specific functions in sequence. The manual endpoint will call them sequentially for a single file.
+The batch processor (`process_pending_files`) will iterate over these specific functions in sequence by passing the `file_id`. The manual endpoint will call them sequentially for a single file.
 
 ### 4. Token Counting (Future Proofing)
 The code will be structured to allow inserting a token-counting utility before the `run_translation` and `run_summarization` steps in the future, checking if the text exceeds 4096 tokens. Comments will be added indicating where this logic should go.

@@ -22,11 +22,19 @@ def _guard_text(text: str) -> str:
     return text
 
 
-async def _chat(messages: list[dict], temperature: float = 0.3) -> str:
-    if not settings.llama_server_url:
+async def _chat(messages: list[dict], temperature: float = 0.3, step: str | None = None) -> str:
+    if step is not None:
+        from app.services.model_config import get_model_config  # local import to avoid circular imports
+        cfg = get_model_config(step)
+        server_url = cfg.server_url
+        model_name = cfg.model_name
+    else:
+        server_url = settings.llama_server_url
+        model_name = settings.llama_model
+    if not server_url:
         raise RuntimeError("LLAMA_SERVER_URL is not configured. Cannot call LLM.")
-    url = settings.llama_server_url.rstrip("/") + "/v1/chat/completions"
-    payload = {"model": settings.llama_model, "messages": messages, "temperature": temperature}
+    url = server_url.rstrip("/") + "/v1/chat/completions"
+    payload = {"model": model_name, "messages": messages, "temperature": temperature}
     async with httpx.AsyncClient(timeout=120.0) as client:
         response = await client.post(url, json=payload)
         response.raise_for_status()
@@ -43,7 +51,7 @@ async def translate(text: str, source_lang: str) -> str:
         {"role": "system", "content": get_prompt("translate_system")},
         {"role": "user", "content": get_prompt("translate_user").format(text=_guard_text(text))},
     ]
-    return await _chat(messages, temperature=0.3)
+    return await _chat(messages, temperature=0.3, step="translate")
 
 
 async def summarize(text: str) -> str:
@@ -52,7 +60,7 @@ async def summarize(text: str) -> str:
         {"role": "system", "content": get_prompt("summarize_system")},
         {"role": "user", "content": get_prompt("summarize_user").format(text=_guard_text(text))},
     ]
-    return await _chat(messages, temperature=0.3)
+    return await _chat(messages, temperature=0.3, step="summarize")
 
 
 async def extract(text: str) -> Dict[str, Any]:
@@ -61,7 +69,7 @@ async def extract(text: str) -> Dict[str, Any]:
         {"role": "system", "content": get_prompt("extract_system")},
         {"role": "user", "content": get_prompt("extract_user").format(text=_guard_text(text))},
     ]
-    raw = await _chat(messages, temperature=0.0)
+    raw = await _chat(messages, temperature=0.0, step="extract")
     cleaned = re.sub(r"^```(?:json)?\s*", "", raw.strip(), flags=re.IGNORECASE)
     cleaned = re.sub(r"\s*```$", "", cleaned)
     try:

@@ -13,15 +13,18 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 _model: Optional[object] = None  # WhisperModel, typed as object to avoid import at module level
+_current_model_name: Optional[str] = None
 
 
 def _get_model():
-    """Lazy singleton: load WhisperModel on first call, reuse thereafter.
+    """Lazy singleton: load WhisperModel on first call, or when model name changes.
 
     Runs in a thread-pool executor — do not call from async context directly.
     """
-    global _model
-    if _model is None:
+    global _model, _current_model_name
+    from app.services.model_config import get_model_config  # local import to avoid circular imports
+    desired = get_model_config("transcribe").model_name
+    if _model is None or _current_model_name != desired:
         from faster_whisper import WhisperModel
 
         try:
@@ -32,7 +35,7 @@ def _get_model():
 
         logger.info(
             "Loading Whisper model '%s' on device='%s' compute_type='int8'.",
-            settings.whisper_model,
+            desired,
             device,
         )
 
@@ -40,7 +43,7 @@ def _get_model():
         try:
             from huggingface_hub.constants import HF_HUB_CACHE
             # faster-whisper default models are mapped to Systran/faster-whisper-{size}
-            model_name = settings.whisper_model
+            model_name = desired
             is_default_model = model_name in [
                 "tiny", "tiny.en", "base", "base.en", "small", "small.en",
                 "medium", "medium.en", "large-v1", "large-v2", "large-v3", "large"
@@ -70,7 +73,8 @@ def _get_model():
                 "This may take several minutes and appear frozen."
             )
 
-        _model = WhisperModel(settings.whisper_model, device=device, compute_type="int8", local_files_only=local_files_only)
+        _model = WhisperModel(desired, device=device, compute_type="int8", local_files_only=local_files_only)
+        _current_model_name = desired
         logger.info("Whisper model loaded.")
     return _model
 

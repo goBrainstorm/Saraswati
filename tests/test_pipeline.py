@@ -2,10 +2,10 @@ import hashlib
 import uuid
 
 import pytest
-from sqlmodel import Session, select
+from sqlmodel import Session
 
 from app.models import FileRecord
-from app.services.pipeline import process_pending_files, run_pipeline
+from app.services.pipeline import process_pending_files, run_transcription
 
 
 def _make_record(local_path: str = "/nonexistent/path/fake.m4a") -> FileRecord:
@@ -19,8 +19,11 @@ def _make_record(local_path: str = "/nonexistent/path/fake.m4a") -> FileRecord:
 
 
 async def test_process_pending_returns_zero_when_empty(db_engine):
-    count = await process_pending_files()
-    assert count == 0
+    result = await process_pending_files()
+    assert result["attempted"] == 0
+    assert result["succeeded"] == 0
+    assert result["failed"] == 0
+    assert result["errors"] == []
 
 
 async def test_process_pending_counts_attempted(db_engine, db_session: Session):
@@ -28,13 +31,16 @@ async def test_process_pending_counts_attempted(db_engine, db_session: Session):
     db_session.add(record)
     db_session.commit()
 
-    count = await process_pending_files()
-    assert count == 1
+    result = await process_pending_files()
+    assert result["attempted"] == 1
+    assert result["failed"] == 1
+    assert result["succeeded"] == 0
+    assert len(result["errors"]) == 1
 
     with Session(db_engine) as session:
         updated = session.get(FileRecord, record.id)
 
-    assert updated.status != "pending"
+    assert updated.status == "failed"
 
 
 async def test_pipeline_fails_cleanly_for_missing_file(db_engine, db_session: Session):
@@ -43,7 +49,7 @@ async def test_pipeline_fails_cleanly_for_missing_file(db_engine, db_session: Se
     db_session.commit()
     db_session.refresh(record)
 
-    await run_pipeline(record)
+    await run_transcription(record.id)
 
     with Session(db_engine) as session:
         updated = session.get(FileRecord, record.id)

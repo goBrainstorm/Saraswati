@@ -5,6 +5,7 @@ import logging
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
+from uuid import UUID
 
 from sqlmodel import select
 
@@ -18,29 +19,17 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-async def run_pipeline(record: FileRecord) -> Optional[str]:
-    """Process a single FileRecord through the AI pipeline.
+async def run_transcription(file_id: UUID) -> Optional[str]:
+    """Stage 1: Whisper transcription. Returns error message or None on success."""
+    from app.services import whisper_service
 
-    Each stage is independent: failures in later stages do not discard progress
-    from earlier stages. The status field tracks how far processing has reached:
+    with get_session() as session:
+        db_record = session.get(FileRecord, file_id)
+        if not db_record:
+            return "File not found"
+        if db_record.status not in ("pending", "processing"):
+            return None
 
-        pending     → Whisper not yet run
-        processing  → currently running (transient)
-        transcribed → Whisper done; Entry created
-        translated  → LLM translation done
-        summarized  → LLM summarize done
-        done        → entity extraction done; pipeline complete
-        failed      → Whisper failed (no Entry)
-
-    On each run the pipeline resumes from the current status, so interrupted
-    runs are retried incrementally on the next call.
-    """
-    from app.services import whisper_service, llm
-    from app.services.nextcloud import upload_file
-
-    file_id = record.id
-
-    # Mark processing
     with get_session() as session:
         db_record = session.get(FileRecord, file_id)
         db_record.status = "processing"
@@ -48,196 +37,333 @@ async def run_pipeline(record: FileRecord) -> Optional[str]:
         session.commit()
 
     try:
-        local_path = record.local_path
+        with get_session() as session:
+            db_record = session.get(FileRecord, file_id)
+            local_path = db_record.local_path
+            filename = db_record.filename
+
         if not Path(local_path).exists():
             raise FileNotFoundError(f"Local file missing: {local_path}")
 
-        # Load existing Entry (present when resuming a transcribed/translated/summarized file)
+        transcription, language = await whisper_service.transcribe(local_path)
         with get_session() as session:
-            existing = session.exec(
-                select(Entry).where(Entry.file_id == file_id)
-            ).first()
-            entry_id: Optional[object] = existing.id if existing else None
-            transcription: Optional[str] = existing.transcription if existing else None
-            language: Optional[str] = existing.language if existing else None
-            translation: Optional[str] = existing.translation if existing else None
-            summary: Optional[str] = existing.summary if existing else None
-            extracted_json_str: Optional[str] = existing.extracted_json if existing else None
+            entry = Entry(
+                file_id=file_id,
+                language=language,
+                transcription=transcription,
+            )
+            session.add(entry)
+            session.commit()
+        with get_session() as session:
+            db_record = session.get(FileRecord, file_id)
+            db_record.status = "transcribed"
+            session.add(db_record)
+            session.commit()
+        logger.info(
+            "Transcribed %s: lang=%s, %d chars.",
+            filename, language, len(transcription),
+        )
+        return None
 
-        # ── Stage 1: Transcribe ───────────────────────────────────────────────
-        if not transcription:
-            transcription, language = await whisper_service.transcribe(local_path)
-            with get_session() as session:
-                entry = Entry(
-                    file_id=file_id,
-                    language=language,
-                    transcription=transcription,
-                )
-                session.add(entry)
-                session.commit()
-                session.refresh(entry)
-                entry_id = entry.id
-            with get_session() as session:
-                db_record = session.get(FileRecord, file_id)
-                db_record.status = "transcribed"
+    except Exception as exc:
+        logger.error(
+            "Pipeline failed for file_id=%s: %s",
+            file_id, exc, exc_info=True,
+        )
+        with get_session() as session:
+            db_record = session.get(FileRecord, file_id)
+            if db_record:
+                db_record.status = "failed"
+                db_record.processed_at = _utcnow()
                 session.add(db_record)
                 session.commit()
-            logger.info(
-                "Transcribed %s: lang=%s, %d chars.",
-                record.filename, language, len(transcription),
-            )
+        return str(exc)
 
-        # ── Stage 2: Translate ────────────────────────────────────────────────
-        if not translation:
-            try:
-                translation = await llm.translate(transcription, language)
-                with get_session() as session:
-                    e = session.get(Entry, entry_id)
-                    e.translation = translation
-                    session.add(e)
-                    session.commit()
-                with get_session() as session:
-                    db_record = session.get(FileRecord, file_id)
-                    db_record.status = "translated"
-                    session.add(db_record)
-                    session.commit()
-            except Exception as exc:
-                logger.warning(
-                    "Translation failed for %s (%s): %s. Will retry next run.",
-                    record.filename, file_id, exc,
-                )
-                return None  # transcription saved; retry next run
 
-        # ── Stage 3: Summarize ────────────────────────────────────────────────
-        if not summary:
-            try:
-                text = translation or transcription
-                summary = await llm.summarize(text)
-                with get_session() as session:
-                    e = session.get(Entry, entry_id)
-                    e.summary = summary
-                    session.add(e)
-                    session.commit()
-                with get_session() as session:
-                    db_record = session.get(FileRecord, file_id)
-                    db_record.status = "summarized"
-                    session.add(db_record)
-                    session.commit()
-            except Exception as exc:
-                logger.warning(
-                    "Summarize failed for %s (%s): %s. Will retry next run.",
-                    record.filename, file_id, exc,
-                )
-                return None  # translation saved; retry next run
+async def run_translation(file_id: UUID) -> Optional[str]:
+    """Stage 2: LLM translation. Returns error message or None on success."""
+    from app.services import llm
 
-        # ── Stage 4: Extract entities ─────────────────────────────────────────
-        if not extracted_json_str:
-            try:
-                text = translation or transcription
-                extracted = await llm.extract(text)
-                extracted_json_str = json.dumps(extracted, ensure_ascii=False)
-                with get_session() as session:
-                    e = session.get(Entry, entry_id)
-                    e.extracted_json = extracted_json_str
-                    session.add(e)
-                    session.commit()
-            except Exception as exc:
-                logger.warning(
-                    "Extraction failed for %s (%s): %s. Will retry next run.",
-                    record.filename, file_id, exc,
-                )
-                return None  # summary saved; retry next run
+    with get_session() as session:
+        db_record = session.get(FileRecord, file_id)
+        if not db_record:
+            return "File not found"
+        if db_record.status != "transcribed":
+            return None
+        filename = db_record.filename
+        existing = session.exec(
+            select(Entry).where(Entry.file_id == file_id)
+        ).first()
+        if not existing:
+            return "Entry not found"
+        entry_id = existing.id
+        transcription = existing.transcription
+        language = existing.language
+        translation = existing.translation
 
-        # ── Stage 5: Embed and upsert to Qdrant (non-fatal) ──────────────────
+    if translation:
+        return None
+
+    try:
+        # TODO: Check token count > 4096 here before translation
+        translation = await llm.translate(transcription, language)
+        with get_session() as session:
+            e = session.get(Entry, entry_id)
+            e.translation = translation
+            session.add(e)
+            session.commit()
+        with get_session() as session:
+            db_record = session.get(FileRecord, file_id)
+            db_record.status = "translated"
+            session.add(db_record)
+            session.commit()
+        return None
+    except Exception as exc:
+        logger.warning(
+            "Translation failed for %s (%s): %s. Will retry next run.",
+            filename, file_id, exc,
+        )
+        return str(exc)
+
+
+async def run_summarization(file_id: UUID) -> Optional[str]:
+    """Stage 3: LLM summarization. Returns error message or None on success."""
+    from app.services import llm
+
+    with get_session() as session:
+        db_record = session.get(FileRecord, file_id)
+        if not db_record:
+            return "File not found"
+        if db_record.status != "translated":
+            return None
+        filename = db_record.filename
+        existing = session.exec(
+            select(Entry).where(Entry.file_id == file_id)
+        ).first()
+        if not existing:
+            return "Entry not found"
+        entry_id = existing.id
+        transcription = existing.transcription
+        translation = existing.translation
+        summary = existing.summary
+
+    if summary:
+        return None
+
+    try:
+        # TODO: Check token count > 4096 here before summarization
+        text = translation or transcription
+        summary = await llm.summarize(text)
+        with get_session() as session:
+            e = session.get(Entry, entry_id)
+            e.summary = summary
+            session.add(e)
+            session.commit()
+        with get_session() as session:
+            db_record = session.get(FileRecord, file_id)
+            db_record.status = "summarized"
+            session.add(db_record)
+            session.commit()
+        return None
+    except Exception as exc:
+        logger.warning(
+            "Summarize failed for %s (%s): %s. Will retry next run.",
+            filename, file_id, exc,
+        )
+        return str(exc)
+
+
+async def run_extraction_and_finalize(file_id: UUID) -> Optional[str]:
+    """Stages 4–6: extract, embed, mark done, Nextcloud. Returns error or None."""
+    from app.services import llm
+    from app.services.nextcloud import upload_file
+
+    with get_session() as session:
+        db_record = session.get(FileRecord, file_id)
+        if not db_record:
+            return "File not found"
+        if db_record.status != "summarized":
+            return None
+        local_path = db_record.local_path
+        filename = db_record.filename
+        existing = session.exec(
+            select(Entry).where(Entry.file_id == file_id)
+        ).first()
+        if not existing:
+            return "Entry not found"
+        entry_id = existing.id
+        transcription = existing.transcription
+        translation = existing.translation
+        extracted_json_str = existing.extracted_json
+
+    if not extracted_json_str:
         try:
-            from app.services.embedder import upsert_entry
-            with get_session() as session:
-                entry_obj = session.get(Entry, entry_id)
-            qdrant_id = await upsert_entry(entry_obj, record.filename)
+            text = translation or transcription
+            extracted = await llm.extract(text)
+            extracted_json_str = json.dumps(extracted, ensure_ascii=False)
             with get_session() as session:
                 e = session.get(Entry, entry_id)
-                e.qdrant_id = qdrant_id
+                e.extracted_json = extracted_json_str
                 session.add(e)
                 session.commit()
         except Exception as exc:
             logger.warning(
-                "Qdrant upsert failed for %s: %s. Entry stored in SQLite without embedding.",
-                record.filename, exc,
+                "Extraction failed for %s (%s): %s. Will retry next run.",
+                filename, file_id, exc,
             )
+            return str(exc)
 
-        # ── Mark done ─────────────────────────────────────────────────────────
+    try:
+        from app.services.embedder import upsert_entry
         with get_session() as session:
-            db_record = session.get(FileRecord, file_id)
-            db_record.status = "done"
-            db_record.processed_at = _utcnow()
-            session.add(db_record)
+            entry_obj = session.get(Entry, entry_id)
+            record_obj = session.get(FileRecord, file_id)
+        qdrant_id = await upsert_entry(entry_obj, record_obj.filename)
+        with get_session() as session:
+            e = session.get(Entry, entry_id)
+            e.qdrant_id = qdrant_id
+            session.add(e)
             session.commit()
-
-        logger.info("Pipeline complete for %s (%s).", record.filename, file_id)
-
-        # ── Stage 6: Nextcloud upload (non-fatal) ─────────────────────────────
-        try:
-            remote_path = await upload_file(local_path, record.filename)
-            if remote_path:
-                with get_session() as session:
-                    db_record = session.get(FileRecord, file_id)
-                    db_record.nextcloud_path = remote_path
-                    session.add(db_record)
-                    session.commit()
-        except Exception as exc:
-            logger.warning(
-                "Nextcloud upload failed for %s: %s. File stays local.",
-                record.filename, exc,
-            )
-
-        return None  # success
-
     except Exception as exc:
-        logger.error(
-            "Pipeline failed for %s (%s): %s",
-            record.filename, file_id, exc, exc_info=True,
+        logger.warning(
+            "Qdrant upsert failed for %s: %s. Entry stored in SQLite without embedding.",
+            filename, exc,
         )
-        with get_session() as session:
-            db_record = session.get(FileRecord, file_id)
-            db_record.status = "failed"
-            db_record.processed_at = _utcnow()
-            session.add(db_record)
-            session.commit()
-        return str(exc)
+
+    with get_session() as session:
+        db_record = session.get(FileRecord, file_id)
+        db_record.status = "done"
+        db_record.processed_at = _utcnow()
+        session.add(db_record)
+        session.commit()
+
+    logger.info("Pipeline complete for %s (%s).", filename, file_id)
+
+    try:
+        remote_path = await upload_file(local_path, filename)
+        if remote_path:
+            with get_session() as session:
+                db_record = session.get(FileRecord, file_id)
+                db_record.nextcloud_path = remote_path
+                session.add(db_record)
+                session.commit()
+    except Exception as exc:
+        logger.warning(
+            "Nextcloud upload failed for %s: %s. File stays local.",
+            filename, exc,
+        )
+
+    return None
 
 
 async def process_pending_files() -> dict:
-    """Query all resumable FileRecords and run the pipeline on each sequentially.
-
-    Picks up files at any intermediate status so interrupted pipelines are
-    retried automatically.
+    """Run pipeline in horizontal batches; each stage processes all eligible files.
 
     Returns:
         Dict with keys: attempted, succeeded, failed, errors (list of {filename, error}).
     """
     with get_session() as session:
-        statement = select(FileRecord).where(
-            FileRecord.status.in_(  # type: ignore[attr-defined]
-                ["pending", "transcribed", "translated", "summarized"]
-            )
-        )
-        pending = session.exec(statement).all()
+        pending = session.exec(
+            select(FileRecord).where(FileRecord.status == "pending")
+        ).all()
+        pending_ids = [r.id for r in pending]
+    with get_session() as session:
+        transcribed = session.exec(
+            select(FileRecord).where(FileRecord.status == "transcribed")
+        ).all()
+        transcribed_ids = [r.id for r in transcribed]
+    with get_session() as session:
+        translated = session.exec(
+            select(FileRecord).where(FileRecord.status == "translated")
+        ).all()
+        translated_ids = [r.id for r in translated]
+    with get_session() as session:
+        summarized = session.exec(
+            select(FileRecord).where(FileRecord.status == "summarized")
+        ).all()
+        summarized_ids = [r.id for r in summarized]
 
-    count = len(pending)
-    if count == 0:
+    if not (pending_ids or transcribed_ids or translated_ids or summarized_ids):
         logger.info("No pending files to process.")
         return {"attempted": 0, "succeeded": 0, "failed": 0, "errors": []}
 
-    logger.info("Processing %d file(s).", count)
+    total = (
+        len(pending_ids)
+        + len(transcribed_ids)
+        + len(translated_ids)
+        + len(summarized_ids)
+    )
+    logger.info(
+        "Processing batches: pending=%d transcribed=%d translated=%d summarized=%d (total=%d).",
+        len(pending_ids),
+        len(transcribed_ids),
+        len(translated_ids),
+        len(summarized_ids),
+        total,
+    )
+
     succeeded = 0
     failed = 0
     errors: list = []
-    for record in pending:
-        error = await run_pipeline(record)
-        if error is None:
-            succeeded += 1
-        else:
-            failed += 1
-            errors.append({"filename": record.filename, "error": error})
+    attempted_ids: set[UUID] = set()
 
-    return {"attempted": count, "succeeded": succeeded, "failed": failed, "errors": errors}
+    for fid in pending_ids:
+        attempted_ids.add(fid)
+        error = await run_transcription(fid)
+        if error:
+            errors.append({"filename": str(fid), "error": error})
+            failed += 1
+        else:
+            succeeded += 1
+
+    with get_session() as session:
+        transcribed = session.exec(
+            select(FileRecord).where(FileRecord.status == "transcribed")
+        ).all()
+        transcribed_ids = [r.id for r in transcribed]
+
+    for fid in transcribed_ids:
+        attempted_ids.add(fid)
+        error = await run_translation(fid)
+        if error:
+            errors.append({"filename": str(fid), "error": error})
+            failed += 1
+        else:
+            succeeded += 1
+
+    with get_session() as session:
+        translated = session.exec(
+            select(FileRecord).where(FileRecord.status == "translated")
+        ).all()
+        translated_ids = [r.id for r in translated]
+
+    for fid in translated_ids:
+        attempted_ids.add(fid)
+        error = await run_summarization(fid)
+        if error:
+            errors.append({"filename": str(fid), "error": error})
+            failed += 1
+        else:
+            succeeded += 1
+
+    with get_session() as session:
+        summarized = session.exec(
+            select(FileRecord).where(FileRecord.status == "summarized")
+        ).all()
+        summarized_ids = [r.id for r in summarized]
+
+    for fid in summarized_ids:
+        attempted_ids.add(fid)
+        error = await run_extraction_and_finalize(fid)
+        if error:
+            errors.append({"filename": str(fid), "error": error})
+            failed += 1
+        else:
+            succeeded += 1
+
+    return {
+        "attempted": len(attempted_ids),
+        "succeeded": succeeded,
+        "failed": failed,
+        "errors": errors,
+    }

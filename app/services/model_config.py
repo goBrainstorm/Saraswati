@@ -45,7 +45,10 @@ def seed_model_configs() -> None:
             if existing is not None:
                 continue
 
-            server_url = spec.get("server_url", getattr(settings, spec["server_url_attr"]))
+            if "server_url" in spec:
+                server_url = spec["server_url"]
+            else:
+                server_url = getattr(settings, spec["server_url_attr"])
             model_name = getattr(settings, spec["model_name_attr"])
 
             row = ModelConfig(step=step, server_url=server_url, model_name=model_name)
@@ -68,6 +71,8 @@ def get_model_config(step: str) -> ModelConfig:
 
 def upsert_model_config(step: str, server_url: str, model_name: str) -> ModelConfig:
     """Update existing row or insert new one; returns the persisted row."""
+    if step not in VALID_STEPS:
+        raise ValueError(f"Invalid step {step!r}. Must be one of {VALID_STEPS}")
     with get_session() as session:
         row = session.exec(
             select(ModelConfig).where(ModelConfig.step == step)

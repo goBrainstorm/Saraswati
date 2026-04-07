@@ -116,5 +116,15 @@ async def get_available_models(
             detail=f"Could not reach model server at {server_url}: {exc}",
         )
 
-    models = [item["id"] for item in data.get("data", [])]
+    # OpenAI-style /v1/models uses {"data": [...]}; some servers send "data": null.
+    # dict.get("key", default) returns None if the key exists with value null.
+    if not isinstance(data, dict):
+        logger.warning("Unexpected JSON from model server at %s: not an object", url)
+        raw = []
+    else:
+        raw = data.get("data") or []
+    if not isinstance(raw, list):
+        logger.warning("Unexpected JSON from model server at %s: data is not a list", url)
+        raw = []
+    models = [item["id"] for item in raw if isinstance(item, dict) and "id" in item]
     return AvailableModelsResponse(models=models, cached=[])

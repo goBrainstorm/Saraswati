@@ -253,6 +253,22 @@ DB_PATH                 — SQLite file path
 
 ## Backlog — Pending Feature Specs
 
+### Fix page reload bug
+
+**Reported 2026-04-07.**
+
+Page reload is buggy — the whole page resets itself and everything that is marked (e.g., checkboxes, selections) gets undone. Need to investigate and fix state persistence on page reload.
+
+---
+
+### Dynamic context size
+
+**Reported 2026-04-07.**
+
+Implement dynamic context size management — context window should scale larger if needed to accommodate the full content without truncation.
+
+---
+
 ### Batch-first pipeline ordering + per-file step visibility
 
 **Requested 2026-04-06. Do not implement until explicitly tasked.**

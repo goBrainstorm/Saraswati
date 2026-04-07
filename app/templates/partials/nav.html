@@ -1,0 +1,5 @@
+<nav style="display:flex; gap:1.5rem; margin-bottom:2rem; padding-bottom:1rem; border-bottom:1px solid var(--border);">
+  <a href="/" style="font-weight:{% if active_page == 'files' %}600{% else %}400{% endif %}; color:{% if active_page == 'files' %}var(--accent){% else %}var(--muted){% endif %}; font-size:0.9rem; text-decoration:none; transition:color 0.15s;" {% if active_page == 'files' %}aria-current="page"{% endif %}>Files</a>
+  <a href="/entries" style="font-weight:{% if active_page == 'entries' %}600{% else %}400{% endif %}; color:{% if active_page == 'entries' %}var(--accent){% else %}var(--muted){% endif %}; font-size:0.9rem; text-decoration:none; transition:color 0.15s;" {% if active_page == 'entries' %}aria-current="page"{% endif %}>Entries</a>
+  <a href="/settings" style="font-weight:{% if active_page == 'settings' %}600{% else %}400{% endif %}; color:{% if active_page == 'settings' %}var(--accent){% else %}var(--muted){% endif %}; font-size:0.9rem; text-decoration:none; transition:color 0.15s;" {% if active_page == 'settings' %}aria-current="page"{% endif %}>Settings</a>
+</nav>

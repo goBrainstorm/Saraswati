@@ -328,11 +328,7 @@
 <body>
   <div class="container">
 
-    <!-- Header -->
-    <header>
-      <h1>Personal Knowledge Base</h1>
-      <p>Self-hosted audio ingestion and knowledge pipeline — Phase 2</p>
-    </header>
+    {% include "partials/nav.html" %}
 
     <!-- ---------------------------------------------------------------- -->
     <!-- Upload section                                                    -->
@@ -378,28 +374,6 @@
     </section>
 
     <!-- ---------------------------------------------------------------- -->
-    <!-- Entries section                                                    -->
-    <!-- ---------------------------------------------------------------- -->
-    <section>
-      <h2>
-        Processed Entries
-        <span class="htmx-indicator" id="entries-spinner" style="font-size:0.75rem; color:var(--muted); font-weight:400; letter-spacing:0; text-transform:none; margin-left:0.5rem;">
-          refreshing<span class="spinner"></span>
-        </span>
-      </h2>
-
-      <div
-        id="entries-panel"
-        hx-get="/api/entries/table"
-        hx-trigger="load, every 15s"
-        hx-swap="innerHTML"
-        hx-indicator="#entries-spinner"
-      >
-        <p style="color:var(--muted); font-size:0.875rem;">Loading...</p>
-      </div>
-    </section>
-
-    <!-- ---------------------------------------------------------------- -->
     <!-- Manual trigger section                                            -->
     <!-- ---------------------------------------------------------------- -->
     <section>
@@ -420,19 +394,6 @@
         </button>
       </div>
       <div id="process-result"></div>
-    </section>
-
-    <!-- ---------------------------------------------------------------- -->
-    <!-- Prompt configuration section                                       -->
-    <!-- ---------------------------------------------------------------- -->
-    <section id="prompts-section">
-      <h2>Prompt Configuration</h2>
-      <p style="color:var(--muted); font-size:0.875rem; margin-bottom:1.5rem;">
-        Edit the prompts used by the LLM pipeline. Changes take effect on the next pipeline run.
-      </p>
-      <div id="prompts-container">
-        <p style="color:var(--muted); font-size:0.875rem;">Loading...</p>
-      </div>
     </section>
 
     <footer>
@@ -591,79 +552,55 @@
           el.textContent = 'Pipeline triggered.';
         }
         htmx.trigger('#status-panel', 'load');
-        htmx.trigger('#entries-panel', 'load');
       } else {
         el.className = 'result-err';
         el.textContent = 'Trigger failed: HTTP ' + evt.detail.xhr.status;
       }
     }
-    (async function loadPrompts() {
-      const container = document.getElementById('prompts-container');
-      if (!container) return;
-      try {
-        const resp = await fetch('/api/prompts');
-        const prompts = await resp.json();
-        const labels = {
-          translate_system: 'Translate — System',
-          translate_user:   'Translate — User template',
-          summarize_system: 'Summarize — System',
-          summarize_user:   'Summarize — User template',
-          extract_system:   'Extract — System',
-          extract_user:     'Extract — User template',
-        };
-        container.innerHTML = Object.entries(prompts).filter(([key]) => key in labels).map(([key, val]) => `
-          <div style="margin-bottom:1.5rem;">
-            <label style="display:block; font-size:0.8rem; color:var(--muted); margin-bottom:0.4rem; text-transform:uppercase; letter-spacing:0.05em;">
-              ${labels[key]}
-            </label>
-            <textarea id="prompt-${key}" rows="4" style="width:100%; background:var(--bg); color:var(--text); border:1px solid var(--border); border-radius:var(--radius); padding:0.6rem; font-family:monospace; font-size:0.8rem; resize:vertical;">${val.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</textarea>
-            <button data-prompt-key="${key}" class="secondary prompt-save-btn" style="margin-top:0.4rem; font-size:0.8rem; padding:0.3rem 0.8rem;">Save</button>
-            <span id="prompt-msg-${key}" style="font-size:0.8rem; margin-left:0.75rem; color:var(--muted);"></span>
-          </div>
-        `).join('');
-        container.querySelectorAll('.prompt-save-btn').forEach(btn => {
-          btn.addEventListener('click', () => savePrompt(btn.dataset.promptKey));
-        });
-      } catch (e) {
-        container.innerHTML = '<p style="color:var(--danger)">Failed to load prompts.</p>';
-      }
-    })();
-
-    function toggleEntryDetail(id, row) {
-      const detail = document.getElementById(id);
-      if (!detail) return;
-      const arrow = row ? row.querySelector('td:last-child') : null;
-      if (detail.style.display === 'none') {
-        detail.style.display = '';
-        if (arrow) arrow.textContent = '▼';
-      } else {
-        detail.style.display = 'none';
-        if (arrow) arrow.textContent = '▶';
+    // Batch operations for file status table
+    function updateBatchToolbar() {
+      const checked = document.querySelectorAll('.row-select:checked');
+      const toolbar = document.getElementById('batch-toolbar');
+      if (!toolbar) return;
+      const countEl = document.getElementById('selection-count');
+      if (countEl) countEl.textContent = checked.length;
+      toolbar.style.display = checked.length > 0 ? 'flex' : 'none';
+      // Pause auto-poll when checkboxes are checked
+      const panel = document.getElementById('status-panel');
+      if (panel) {
+        if (checked.length > 0) {
+          panel.removeAttribute('hx-trigger');
+        } else {
+          panel.setAttribute('hx-trigger', 'load, every 10s');
+          htmx.process(panel);
+        }
       }
     }
 
-    async function savePrompt(key) {
-      const textarea = document.getElementById('prompt-' + key);
-      const msgEl = document.getElementById('prompt-msg-' + key);
-      if (!textarea) return;
-      msgEl.textContent = 'Saving\u2026';
-      msgEl.style.color = 'var(--muted)';
+    function selectAllRows(checkbox) {
+      document.querySelectorAll('.row-select').forEach(cb => {
+        cb.checked = checkbox.checked;
+      });
+      updateBatchToolbar();
+    }
+
+    async function batchAction(endpoint) {
+      const ids = Array.from(document.querySelectorAll('.row-select:checked')).map(cb => cb.value);
+      if (!ids.length) return;
       try {
-        const resp = await fetch('/api/prompts/' + key, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text: textarea.value }),
+        await fetch(endpoint, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ids}),
         });
-        if (resp.ok) {
-          msgEl.textContent = 'Saved.';
-          msgEl.style.color = 'var(--success)';
-        } else {
-          msgEl.textContent = 'Error: ' + resp.status;
-          msgEl.style.color = 'var(--danger)';
+      } finally {
+        // Re-enable polling and refresh
+        const panel = document.getElementById('status-panel');
+        if (panel) {
+          panel.setAttribute('hx-trigger', 'load, every 10s');
+          htmx.process(panel);
         }
-      } catch {
-        msgEl.textContent = 'Network error.';
-        msgEl.style.color = 'var(--danger)';
+        if (typeof htmx !== 'undefined') htmx.trigger('#status-panel', 'load');
       }
     }
   </script>

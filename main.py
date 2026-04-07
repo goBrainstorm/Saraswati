@@ -4,12 +4,13 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import uvicorn
-from fastapi import FastAPI
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, Request
+from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
 from app.database import create_db_and_tables
+from app.templates_env import templates
 from app.routes import entries, models_config as models_config_route, process, prompts, settings as settings_route, status, upload
 from app.scheduler import start_scheduler, stop_scheduler
 from app.services.model_config import seed_model_configs
@@ -80,12 +81,9 @@ app.include_router(settings_route.router)
 # ---------------------------------------------------------------------------
 # Frontend
 # ---------------------------------------------------------------------------
-_TEMPLATES_DIR = Path(__file__).parent / "app" / "templates"
-
-
 @app.get("/", include_in_schema=False)
-async def index() -> FileResponse:
-    return FileResponse(str(_TEMPLATES_DIR / "index.html"))
+async def index(request: Request) -> HTMLResponse:
+    return templates.TemplateResponse(request, "index.html", {"active_page": "files"})
 
 
 # ---------------------------------------------------------------------------

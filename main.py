@@ -41,6 +41,10 @@ async def lifespan(app: FastAPI):
     # Initialise database
     create_db_and_tables()
 
+    # Seed default model configs (idempotent)
+    from app.services.model_config import seed_model_configs
+    seed_model_configs()
+
     # Start background scheduler
     start_scheduler()
 

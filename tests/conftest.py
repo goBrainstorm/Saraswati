@@ -39,8 +39,30 @@ def session(monkeypatch, setup_test_env):
     sqlite_url = f"sqlite:///{db_path}"
     engine = create_engine(sqlite_url, connect_args={"check_same_thread": False})
     SQLModel.metadata.create_all(engine)
-    
+
     monkeypatch.setattr(app_db, "engine", engine)
-    
+
     with Session(engine) as session:
         yield session
+
+
+@pytest.fixture
+def db_engine(tmp_path, monkeypatch):
+    db_path = tmp_path / "test.db"
+    engine = create_engine(f"sqlite:///{db_path}", connect_args={"check_same_thread": False})
+    SQLModel.metadata.create_all(engine)
+    monkeypatch.setattr(app_db, "engine", engine)
+    yield engine
+
+
+@pytest.fixture
+def db_session(db_engine):
+    with Session(db_engine) as session:
+        yield session
+
+
+@pytest_asyncio.fixture
+async def app_client(db_engine):
+    transport = ASGITransport(app=fastapi_app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        yield ac

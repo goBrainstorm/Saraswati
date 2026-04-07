@@ -75,28 +75,32 @@ async def entries_page(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(request, "entries.html", {"active_page": "entries"})
 
 
-@router.delete("/api/entries/{entry_id}")
-async def delete_entry(entry_id: UUID) -> Response:
-    """Delete an entire Entry row."""
+def _delete_entry_and_revert(entry_id: UUID) -> Response:
+    """Shared logic: delete Entry row and revert FileRecord status to 'pending'."""
     with get_session() as session:
         entry = session.get(Entry, entry_id)
         if not entry:
             raise HTTPException(status_code=404, detail="Entry not found")
+        record = session.get(FileRecord, entry.file_id)
         session.delete(entry)
+        if record:
+            record.status = "pending"
+            record.processed_at = None
+            session.add(record)
         session.commit()
     return Response(status_code=200)
+
+
+@router.delete("/api/entries/{entry_id}")
+async def delete_entry(entry_id: UUID) -> Response:
+    """Delete an entire Entry row and revert FileRecord status to 'pending'."""
+    return _delete_entry_and_revert(entry_id)
 
 
 @router.delete("/api/entries/{entry_id}/transcription")
 async def delete_entry_transcription(entry_id: UUID) -> Response:
-    """Delete an entire Entry row (transcription is the base field)."""
-    with get_session() as session:
-        entry = session.get(Entry, entry_id)
-        if not entry:
-            raise HTTPException(status_code=404, detail="Entry not found")
-        session.delete(entry)
-        session.commit()
-    return Response(status_code=200)
+    """Delete an entire Entry row (transcription is the base field) and revert FileRecord status to 'pending'."""
+    return _delete_entry_and_revert(entry_id)
 
 
 @router.delete("/api/entries/{entry_id}/translation")

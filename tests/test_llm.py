@@ -1,5 +1,6 @@
 import pytest
 
+from app.models import ModelConfig
 from app.services.llm import _guard_text, _MAX_CHARS, translate, summarize, extract
 
 
@@ -13,20 +14,23 @@ async def test_translate_skips_english_variants():
     assert await translate("hello", "en-GB") == "hello"
 
 
-async def test_translate_raises_when_url_empty(monkeypatch):
-    monkeypatch.setattr("app.services.llm.settings.llama_server_url", "")
+async def test_translate_raises_when_url_empty(db_engine, db_session):
+    db_session.add(ModelConfig(step="translate", server_url="", model_name="test"))
+    db_session.commit()
     with pytest.raises(RuntimeError, match="LLAMA_SERVER_URL"):
         await translate("Hallo", "de")
 
 
-async def test_summarize_raises_when_url_empty(monkeypatch):
-    monkeypatch.setattr("app.services.llm.settings.llama_server_url", "")
+async def test_summarize_raises_when_url_empty(db_engine, db_session):
+    db_session.add(ModelConfig(step="summarize", server_url="", model_name="test"))
+    db_session.commit()
     with pytest.raises(RuntimeError, match="LLAMA_SERVER_URL"):
         await summarize("text")
 
 
-async def test_extract_raises_when_url_empty(monkeypatch):
-    monkeypatch.setattr("app.services.llm.settings.llama_server_url", "")
+async def test_extract_raises_when_url_empty(db_engine, db_session):
+    db_session.add(ModelConfig(step="extract", server_url="", model_name="test"))
+    db_session.commit()
     with pytest.raises(RuntimeError, match="LLAMA_SERVER_URL"):
         await extract("text")
 

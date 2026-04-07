@@ -45,6 +45,8 @@ Key settings:
 | `SCHEDULE_CRON` | `0 3 * * *` | When the pipeline job runs (daily at 03:00) |
 | `NEXTCLOUD_URL` | _(empty)_ | Leave blank to disable Nextcloud archiving |
 | `WHISPER_BATCH_SIZE` | `8` | faster-whisper inference batching size (does not parallelize multiple files) |
+| `LLAMA_SERVER_URL` | `http://localhost:8080` | Base URL of an OpenAI-compatible server: **llama.cpp** `llama-server` (default port **8080**) or **Ollama** (default **11434**). Saraswati does not start this process for you. |
+| `LLAMA_MODEL` | `gemma-4-e4b` | Model id passed to the server (must match what `/v1/models` reports for that backend). Per-step overrides live in Settings. |
 
 ### 3. Start the server
 

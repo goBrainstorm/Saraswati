@@ -331,6 +331,10 @@
     .model-row label { font-size: 0.8rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; display: block; margin-bottom: 0.3rem; }
     .model-row input, .model-row select { width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius); padding: 0.45rem 0.65rem; font-size: 0.875rem; font-family: inherit; }
     .model-row input:focus, .model-row select:focus { outline: none; border-color: var(--accent); }
+    .model-status { font-size: 0.75rem; margin-top: 0.35rem; display: block; line-height: 1.35; color: var(--muted); }
+    .model-status.ok { color: var(--success); }
+    .model-status.warn { color: var(--warning); }
+    .model-status.err { color: var(--danger); }
     .step-label { font-weight: 600; font-size: 0.875rem; padding-top: 0.4rem; }
   </style>
 </head>
@@ -434,16 +438,25 @@
       try {
         const resp = await fetch('/api/models/config');
         const configs = await resp.json();
-        // Build rows
         const rows = configs.map(cfg => buildModelRow(cfg));
         container.innerHTML = rows.join('');
-        // Attach save handlers
         configs.forEach(cfg => {
           const saveBtn = document.getElementById('save-' + cfg.step);
           if (saveBtn) saveBtn.addEventListener('click', () => saveModelConfig(cfg.step));
           if (cfg.step !== 'transcribe') {
             const refreshBtn = document.getElementById('refresh-' + cfg.step);
-            if (refreshBtn) refreshBtn.addEventListener('click', () => refreshModels(cfg.step));
+            if (refreshBtn) refreshBtn.addEventListener('click', () => refreshModels(cfg.step, { silent: false }));
+            const urlInput = document.getElementById('url-' + cfg.step);
+            if (urlInput) {
+              urlInput.addEventListener('blur', () => scheduleRefreshFromUrl(cfg.step));
+            }
+            const url = (cfg.server_url || '').trim();
+            if (!url) {
+              setLlmModelStatus(cfg.step, '', 'Set a server URL. The model list loads when you leave this field or use Refresh.');
+            } else {
+              setLlmModelStatus(cfg.step, '', 'Checking server…');
+              refreshModels(cfg.step, { silent: true, savedModelName: cfg.model_name });
+            }
           }
         });
       } catch(e) {
@@ -474,8 +487,10 @@
             </div>
           </div>`;
       } else {
+        const saved = cfg.model_name || '';
+        const optLabel = saved ? escHtml(saved) + ' (saved — not yet verified)' : '(none)';
         return `
-          <div class="model-row" id="row-${cfg.step}">
+          <div class="model-row" id="row-${cfg.step}" data-saved-model="${escAttr(saved)}">
             <div><span class="step-label">${stepLabel}</span></div>
             <div>
               <label>Server URL</label>
@@ -484,8 +499,9 @@
             <div>
               <label>Model</label>
               <select id="model-${cfg.step}">
-                <option value="${escHtml(cfg.model_name)}" selected>${escHtml(cfg.model_name) || '(none)'}</option>
+                <option value="${escHtml(saved)}" selected>${optLabel}</option>
               </select>
+              <span id="model-status-${cfg.step}" class="model-status" aria-live="polite"></span>
             </div>
             <div style="display:flex; gap:0.5rem; align-items:flex-end;">
               <button id="refresh-${cfg.step}" class="secondary" style="padding:0.35rem 0.8rem; font-size:0.8rem; white-space:nowrap;" title="Fetch available models from server">&#8635;</button>
@@ -499,25 +515,98 @@
       return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
     }
 
-    async function refreshModels(step) {
+    function escAttr(s) {
+      return String(s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
+    }
+
+    function setLlmModelStatus(step, stateClass, text) {
+      const el = document.getElementById('model-status-' + step);
+      if (!el) return;
+      el.className = 'model-status' + (stateClass ? ' ' + stateClass : '');
+      el.textContent = text || '';
+    }
+
+    function getSavedModelForStep(step) {
+      const row = document.getElementById('row-' + step);
+      if (row && row.dataset.savedModel !== undefined) return row.dataset.savedModel;
+      const sel = document.getElementById('model-' + step);
+      return sel ? sel.value : '';
+    }
+
+    const _urlRefreshTimers = {};
+    function scheduleRefreshFromUrl(step) {
+      clearTimeout(_urlRefreshTimers[step]);
+      _urlRefreshTimers[step] = setTimeout(() => {
+        refreshModels(step, { silent: true });
+      }, 400);
+    }
+
+    function fillModelSelectFromServer(modelSelect, serverModels, preferred) {
+      const names = new Set(serverModels);
+      let html = serverModels.map(m =>
+        `<option value="${escHtml(m)}">${escHtml(m)}</option>`
+      ).join('');
+      if (preferred && !names.has(preferred)) {
+        html += `<option value="${escHtml(preferred)}">${escHtml(preferred)} (saved — not on server list)</option>`;
+      }
+      modelSelect.innerHTML = html;
+      if (preferred !== undefined && preferred !== null && String(preferred).length) {
+        modelSelect.value = preferred;
+      } else if (serverModels.length) {
+        modelSelect.value = serverModels[0];
+      }
+    }
+
+    async function refreshModels(step, opts) {
+      opts = opts || {};
+      const silent = !!opts.silent;
       const urlInput = document.getElementById('url-' + step);
       const modelSelect = document.getElementById('model-' + step);
       const refreshBtn = document.getElementById('refresh-' + step);
       const currentUrl = urlInput ? urlInput.value.trim() : '';
+      const savedModelName = opts.savedModelName !== undefined ? opts.savedModelName : getSavedModelForStep(step);
       if (refreshBtn) { refreshBtn.disabled = true; refreshBtn.textContent = '\u2026'; }
+      if (!silent) setLlmModelStatus(step, '', 'Fetching models…');
       try {
-        const query = currentUrl ? '?server_url=' + encodeURIComponent(currentUrl) : '';
-        const resp = await fetch('/api/models/available/' + step + query);
-        if (!resp.ok) throw new Error('HTTP ' + resp.status);
-        const data = await resp.json();
-        if (modelSelect && data.models && data.models.length) {
-          const current = modelSelect.value;
-          modelSelect.innerHTML = data.models.map(m =>
-            `<option value="${escHtml(m)}" ${m === current ? 'selected' : ''}>${escHtml(m)}</option>`
-          ).join('');
+        if (!currentUrl) {
+          const label = savedModelName ? escHtml(savedModelName) + ' (saved)' : '(none)';
+          if (modelSelect) modelSelect.innerHTML = `<option value="${escHtml(savedModelName)}" selected>${label}</option>`;
+          setLlmModelStatus(step, 'warn', 'Enter a server URL to load models from the server.');
+          return;
         }
-      } catch(e) {
-        alert('Could not fetch models: ' + e.message);
+        const query = '?server_url=' + encodeURIComponent(currentUrl);
+        const resp = await fetch('/api/models/available/' + step + query);
+        if (!resp.ok) {
+          let detail = resp.status + ' ' + resp.statusText;
+          try {
+            const errBody = await resp.json();
+            if (errBody && errBody.detail) detail = typeof errBody.detail === 'string' ? errBody.detail : JSON.stringify(errBody.detail);
+          } catch (_) { /* ignore */ }
+          throw new Error(detail);
+        }
+        const data = await resp.json();
+        const list = Array.isArray(data.models) ? data.models : [];
+        if (modelSelect) {
+          if (list.length === 0) {
+            const v = savedModelName || '';
+            const lab = v ? escHtml(v) + ' (saved — server returned no models)' : '(none)';
+            modelSelect.innerHTML = `<option value="${escHtml(v)}" selected>${lab}</option>`;
+            setLlmModelStatus(step, 'warn', 'Server responded but listed no models. Check that the LLM server is running with a loaded model.');
+          } else {
+            const cur = modelSelect.value;
+            const pick = list.includes(cur) ? cur : savedModelName;
+            fillModelSelectFromServer(modelSelect, list, pick);
+            setLlmModelStatus(step, 'ok', 'Connected — ' + list.length + ' model(s) from server.');
+          }
+        }
+      } catch (e) {
+        const v = savedModelName || '';
+        const lab = v ? escHtml(v) + ' (saved — server unreachable)' : '(none)';
+        if (modelSelect) modelSelect.innerHTML = `<option value="${escHtml(v)}" selected>${lab}</option>`;
+        setLlmModelStatus(step, 'err', 'Could not reach server: ' + (e && e.message ? e.message : String(e)));
+        if (!silent) {
+          /* status line is enough; avoid duplicate modal noise */
+        }
       } finally {
         if (refreshBtn) { refreshBtn.disabled = false; refreshBtn.textContent = '\u21BB'; }
       }
@@ -537,7 +626,13 @@
           body: JSON.stringify({server_url: serverUrl, model_name: modelName}),
         });
         if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        const row = document.getElementById('row-' + step);
+        if (row) row.dataset.savedModel = modelName;
         if (saveBtn) { saveBtn.textContent = 'Saved \u2713'; setTimeout(() => { if (saveBtn) saveBtn.textContent = 'Save'; saveBtn.disabled = false; }, 2000); }
+        if (step !== 'transcribe') {
+          setLlmModelStatus(step, '', 'Saved. Re-checking server…');
+          refreshModels(step, { silent: true, savedModelName: modelName });
+        }
       } catch(e) {
         alert('Failed to save: ' + e.message);
         if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Save'; }

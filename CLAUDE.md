@@ -2,6 +2,8 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+**Current implementation snapshot:** see [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) for what is built vs still open (keeps context small versus reading [ROADMAP.md](ROADMAP.md) in full).
+
 ## Commands
 
 ```bash
@@ -14,7 +16,7 @@ uvicorn main:app --reload
 # Run server via entry point
 python main.py
 
-# Run tests (Phase 1 tests not yet written; target command when they exist)
+# Run tests
 pytest
 
 # Run a single test file
@@ -25,37 +27,40 @@ The virtual environment is at `.venv/`. Activate with `source .venv/bin/activate
 
 ## Architecture
 
-This is a **FastAPI personal knowledge base** — currently Phase 1 of 4. The app ingests audio files, processes them through an AI pipeline, stores results in SQLite + Qdrant, and exposes a RAG chat interface.
+This is a **FastAPI personal knowledge base**. Phases 1–2 and most of the ingestion/processing stack are implemented; **Phase 3 RAG chat is not** (embeddings upsert to Qdrant on pipeline success, but there is no `/api/chat` or retrieval layer yet). See [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md).
 
-**Entry point**: `main.py` — creates the FastAPI app, wires up lifespan (startup/shutdown), includes routers, and serves the HTMX frontend.
+**Entry point**: `main.py` — creates the FastAPI app, wires up lifespan (startup/shutdown), includes routers, seeds `ModelConfig` rows, starts the scheduler, and serves the HTMX frontend.
 
 **`app/config.py`**: Single `Settings` singleton (pydantic-settings) loaded from `.env`. All runtime configuration lives here — see `.env.example` for all keys. Import as `from app.config import settings`.
 
-**`app/models.py`**: Two SQLModel tables — `FileRecord` (`files`) and `Entry` (`entries`). The same classes serve as both ORM models and Pydantic response schemas.
+**`app/models.py`**: SQLModel tables — `FileRecord` (`files`), `Entry` (`entries`), `ModelConfig` (`model_configs`). Same classes serve as ORM models and response schemas where exposed.
 
 **`app/database.py`**: SQLite engine + session context manager. Use `get_session()` as a context manager for all DB access.
 
 **`app/scheduler.py`**: APScheduler instance with two jobs:
-- `pipeline_job` — fires per `SCHEDULE_CRON` (default `0 3 * * *`). Currently a no-op stub; Phase 2 will wire Whisper + LLM here.
+- `pipeline_job` — fires per `SCHEDULE_CRON` (default `0 3 * * *`). Runs `process_pending_files()` and refreshes the short-term cache (`app/services/cache.py`).
 - `cleanup_job` — fires daily at 04:00. Delegates to `app/services/cleanup.py`.
 
-**`app/routes/`** — three routers:
-- `upload.py` — `POST /api/upload`: receives multipart audio, SHA-256 deduplicates, saves to `input/{uuid}_{safe_name}`, creates `FileRecord(status="pending")`.
-- `status.py` — `GET /api/status`: file registry with pagination; `GET /api/status/table` returns HTMX HTML partial.
-- `process.py` — `POST /api/process`: manual pipeline trigger.
+**`app/routes/`** — includes:
+- `upload.py` — `POST /api/upload`: multipart audio, SHA-256 dedup, saves under `input/`, creates `FileRecord(status="pending")`.
+- `status.py` — `GET /api/status`, `GET /api/status/table` (HTMX).
+- `process.py` — `POST /api/process`: manual full pipeline run + cache refresh.
+- `entries.py` — entries API, HTMX table, `/entries` page.
+- `prompts.py`, `models_config.py`, `settings.py` — prompts, per-step LLM config, settings UI.
 
-**`app/services/`**:
-- `cleanup.py` — deletes local files where `status=done AND nextcloud_path IS NOT NULL AND delete_after <= now`. DB record is preserved; only the local copy is removed.
-- `nextcloud.py` — WebDAV PUT to Nextcloud. Returns `""` immediately and logs a warning if `NEXTCLOUD_URL` is empty (no HTTP call made).
+**`app/services/`** (non-exhaustive):
+- `pipeline.py` — Whisper → LLM translate/summarize/extract → Qdrant upsert (non-fatal) → Nextcloud (non-fatal); granular `files.status` for resume.
+- `whisper_service.py`, `llm.py`, `embedder.py`, `cache.py` — transcription, LLM calls, embeddings/Qdrant, rolling JSON cache.
+- `cleanup.py` — deletes local files where `status=done AND nextcloud_path IS NOT NULL AND delete_after <= now`. DB row kept.
+- `nextcloud.py` — WebDAV PUT. Returns `""` if `NEXTCLOUD_URL` is empty (no HTTP).
 
-**`app/templates/`** — HTMX-driven HTML frontend. `index.html` is served at `/`; `partials/status_table.html` is the HTMX swap target for the file list.
+**`app/templates/`** — HTMX frontend: `index.html` at `/`, partials under `partials/`.
 
 ## Testing conventions
 
-Per ROADMAP Phase 1 test plan (tests not yet written):
 - Use `pytest` + `httpx.AsyncClient` with the real FastAPI app.
-- Use a real SQLite database in a `tmp` directory — **no mocks**.
-- Test files go in `tests/` named after the route/service they cover (`test_upload.py`, `test_cleanup.py`, etc.).
+- Use a real SQLite database in a `tmp` directory — **no mocks** (see `tests/conftest.py`).
+- Tests live in `tests/` named by area (`test_upload.py`, `test_pipeline.py`, etc.).
 
 ## Key design decisions
 

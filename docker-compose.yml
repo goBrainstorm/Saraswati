@@ -11,6 +11,9 @@ services:
       - ./data:/app/data
     env_file:
       - .env
+    # Bind all interfaces so published ports work (127.0.0.1 only listens inside the container)
+    environment:
+      HOST: "0.0.0.0"
     depends_on:
       - qdrant
     deploy:

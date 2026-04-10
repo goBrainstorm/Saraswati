@@ -98,7 +98,7 @@ async def index(request: Request) -> HTMLResponse:
 if __name__ == "__main__":
     uvicorn.run(
         "main:app",
-        host=settings.tailscale_host,
+        host=settings.host,
         port=settings.port,
         reload=False,
         log_level="info",

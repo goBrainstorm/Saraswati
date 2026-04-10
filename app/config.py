@@ -1,15 +1,12 @@
 from typing import Literal
 
-from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings
+from pydantic import Field
 
 
 class Settings(BaseSettings):
-    # Server — uvicorn bind. HOST or TAILSCALE_HOST (same value; legacy name kept for .env)
-    host: str = Field(
-        default="127.0.0.1",
-        validation_alias=AliasChoices("HOST", "TAILSCALE_HOST"),
-    )
+    # Server
+    host: str = Field(default="127.0.0.1", alias="HOST")
     port: int = Field(default=8000, alias="PORT")
 
     # Paths
@@ -48,6 +45,9 @@ class Settings(BaseSettings):
     # Qdrant (Phase 3)
     qdrant_url: str = Field(default="http://localhost:6333", alias="QDRANT_URL")
     qdrant_collection: str = Field(default="knowledge", alias="QDRANT_COLLECTION")
+
+    # Tailscale
+    tailscale_host: str = Field(default="127.0.0.1", alias="TAILSCALE_HOST")
 
     model_config = {
         "env_file": ".env",

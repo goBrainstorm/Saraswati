@@ -20,6 +20,9 @@ class Settings(BaseSettings):
     # Schedule (cron expression)
     schedule_cron: str = Field(default="0 3 * * *", alias="SCHEDULE_CRON")
 
+    # Background queue (set false in tests to avoid competing drain tasks)
+    queue_drain_enabled: bool = Field(default=True, alias="QUEUE_DRAIN_ENABLED")
+
     # Nextcloud (WebDAV)
     nextcloud_url: str = Field(default="", alias="NEXTCLOUD_URL")
     nextcloud_user: str = Field(default="", alias="NEXTCLOUD_USER")

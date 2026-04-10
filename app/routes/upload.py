@@ -6,6 +6,7 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, UploadFile
 from sqlmodel import select
 
+from app import queue as _queue_module
 from app.config import settings
 from app.database import get_session
 from app.models import FileRecord
@@ -80,4 +81,5 @@ async def upload_file(file: UploadFile) -> FileRecord:
         session.refresh(record)
 
         logger.info("Created FileRecord id=%s for '%s'.", record.id, original_name)
+        _queue_module.enqueue(record.id)
         return record

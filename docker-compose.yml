@@ -1,10 +1,32 @@
 services:
+  app:
+    build: .
+    container_name: saraswati-app
+    restart: unless-stopped
+    ports:
+      - "${PORT:-8000}:8000"
+    volumes:
+      - ./input:/app/input
+      - ./cache:/app/cache
+      - ./data:/app/data
+    env_file:
+      - .env
+    depends_on:
+      - qdrant
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
   qdrant:
     image: qdrant/qdrant:latest
     container_name: saraswati-qdrant
     restart: unless-stopped
     ports:
-      - "6333:6333"   # REST + gRPC
+      - "6333:6333"
     volumes:
       - qdrant_storage:/qdrant/storage
 

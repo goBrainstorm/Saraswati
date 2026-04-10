@@ -23,6 +23,12 @@ async def client(session):
         fastapi_app.dependency_overrides.pop(get_session, None)
 
 @pytest.fixture(autouse=True)
+def disable_queue_drain_at_startup(monkeypatch):
+    """Avoid a second drain_queue() competing with queue tests and event-loop issues."""
+    monkeypatch.setattr("app.config.settings.queue_drain_enabled", False)
+
+
+@pytest.fixture(autouse=True)
 def setup_test_env(monkeypatch):
     with tempfile.TemporaryDirectory() as temp_dir:
         input_dir = Path(temp_dir) / "input"

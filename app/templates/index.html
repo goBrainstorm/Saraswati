@@ -607,6 +607,16 @@
         if (typeof htmx !== 'undefined') htmx.trigger('#status-panel', 'load');
       }
     }
+
+    // SSE — trigger status table reload on each pipeline stage event
+    (function () {
+      var es = new EventSource('/api/status/stream');
+      es.onmessage = function () {
+        if (typeof htmx !== 'undefined') {
+          htmx.trigger(document.getElementById('status-panel'), 'load');
+        }
+      };
+    })();
   </script>
 </body>
 </html>

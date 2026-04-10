@@ -4,13 +4,15 @@ from typing import Any, Dict, List, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response
-from fastapi.responses import JSONResponse
 from fastapi.responses import HTMLResponse
+from fastapi.responses import JSONResponse
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlmodel import select
 
 from app.database import get_session
 from app.models import Entry, FileRecord
+from app.sse import stream_response
 from app.templates_env import templates
 
 logger = logging.getLogger(__name__)
@@ -51,6 +53,12 @@ async def status_table(request: Request) -> HTMLResponse:
         "partials/status_table.html",
         {"records": records},
     )
+
+
+@router.get("/api/status/stream")
+async def status_stream() -> StreamingResponse:
+    """SSE stream — yields stage-progress events for all active pipeline runs."""
+    return stream_response()
 
 
 @router.get("/api/status/{file_id}")

@@ -143,7 +143,9 @@ async def batch_delete(body: BatchIdsBody) -> JSONResponse:
 @router.post("/api/status/batch-reset")
 async def batch_reset(body: BatchIdsBody) -> JSONResponse:
     """Reset multiple FileRecords to pending status and remove their Entries."""
-    count = 0
+    from app import queue as _queue_module
+
+    reset_ids: list[UUID] = []
     with get_session() as session:
         for file_id in body.ids:
             record = session.get(FileRecord, file_id)
@@ -160,8 +162,12 @@ async def batch_reset(body: BatchIdsBody) -> JSONResponse:
                 session.delete(entry)
 
             session.add(record)
-            count += 1
+            reset_ids.append(file_id)
 
         session.commit()
 
-    return JSONResponse({"count": count})
+    # Enqueue after commit so the drain coroutine sees status="pending" in the DB.
+    for file_id in reset_ids:
+        _queue_module.enqueue(file_id)
+
+    return JSONResponse({"count": len(reset_ids)})

@@ -22,6 +22,13 @@ class Settings(BaseSettings):
 
     # Background queue (set false in tests to avoid competing drain tasks)
     queue_drain_enabled: bool = Field(default=True, alias="QUEUE_DRAIN_ENABLED")
+    # After the first dequeue, wait this long then drain the rest, so sequential
+    # uploads in one drop can share one horizontal batch (same as manual process).
+    queue_coalesce_debounce_seconds: float = Field(
+        default=0.2,
+        alias="QUEUE_COALESCE_DEBOUNCE_SECONDS",
+        ge=0.0,
+    )
 
     # Nextcloud (WebDAV)
     nextcloud_url: str = Field(default="", alias="NEXTCLOUD_URL")

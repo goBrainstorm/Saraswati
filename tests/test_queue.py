@@ -1,14 +1,25 @@
 import asyncio
 import hashlib
 import uuid
+from datetime import datetime, timezone
 
 import pytest
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 # Shared loop: module-level asyncio.Queue must not hop event loops between tests.
 pytestmark = pytest.mark.asyncio(loop_scope="module")
 
-from app.models import FileRecord
+
+@pytest.fixture(autouse=True)
+def zero_queue_coalesce_debounce(monkeypatch):
+    """Keep drain tests fast; debounce is for real sequential uploads only."""
+    monkeypatch.setattr(
+        "app.config.settings.queue_coalesce_debounce_seconds",
+        0.0,
+    )
+
+
+from app.models import Entry, FileRecord
 from app.queue import _queue, drain_queue, enqueue, get_queue_snapshot, reset_processing_queue
 
 
@@ -89,3 +100,108 @@ async def test_drain_queue_continues_after_failure(db_engine, db_session: Sessio
         b = session.get(FileRecord, record_b.id)
     assert a.status == "failed"
     assert b.status == "failed"
+
+
+async def test_drain_queue_runs_horizontal_batches(
+    db_engine, db_session: Session, tmp_path, monkeypatch
+):
+    """Coalesced drain runs all transcriptions before any LLM stage (same as /api/process)."""
+    reset_processing_queue()
+
+    async def llm_always_ready(_step: str) -> None:
+        return None
+
+    monkeypatch.setattr(
+        "app.services.llm.check_llm_server_ready",
+        llm_always_ready,
+    )
+
+    order: list[tuple[str, uuid.UUID]] = []
+
+    async def stub_transcribe(fid: uuid.UUID) -> str | None:
+        order.append(("transcribe", fid))
+        with Session(db_engine) as session:
+            r = session.get(FileRecord, fid)
+            r.status = "transcribed"
+            session.add(r)
+            session.add(
+                Entry(file_id=fid, language="en", transcription="hello")
+            )
+            session.commit()
+        return None
+
+    async def stub_translate(fid: uuid.UUID) -> str | None:
+        order.append(("translate", fid))
+        with Session(db_engine) as session:
+            r = session.get(FileRecord, fid)
+            e = session.exec(select(Entry).where(Entry.file_id == fid)).first()
+            e.translation = "hola"
+            r.status = "translated"
+            session.add(e)
+            session.add(r)
+            session.commit()
+        return None
+
+    async def stub_summarize(fid: uuid.UUID) -> str | None:
+        order.append(("summarize", fid))
+        with Session(db_engine) as session:
+            r = session.get(FileRecord, fid)
+            e = session.exec(select(Entry).where(Entry.file_id == fid)).first()
+            e.summary = "brief"
+            r.status = "summarized"
+            session.add(e)
+            session.add(r)
+            session.commit()
+        return None
+
+    async def stub_extract(fid: uuid.UUID) -> str | None:
+        order.append(("extract", fid))
+        with Session(db_engine) as session:
+            r = session.get(FileRecord, fid)
+            e = session.exec(select(Entry).where(Entry.file_id == fid)).first()
+            e.extracted_json = "{}"
+            r.status = "done"
+            r.processed_at = datetime.now(timezone.utc)
+            session.add(e)
+            session.add(r)
+            session.commit()
+        return None
+
+    monkeypatch.setattr("app.services.pipeline.run_transcription", stub_transcribe)
+    monkeypatch.setattr("app.services.pipeline.run_translation", stub_translate)
+    monkeypatch.setattr("app.services.pipeline.run_summarization", stub_summarize)
+    monkeypatch.setattr(
+        "app.services.pipeline.run_extraction_and_finalize", stub_extract
+    )
+
+    record_a = _make_record(tmp_path)
+    record_b = _make_record(tmp_path)
+    db_session.add(record_a)
+    db_session.add(record_b)
+    db_session.commit()
+
+    enqueue(record_a.id)
+    enqueue(record_b.id)
+
+    drain_task = asyncio.create_task(drain_queue())
+    await _queue.join()
+    drain_task.cancel()
+    try:
+        await drain_task
+    except asyncio.CancelledError:
+        pass
+
+    transcribe_idxs = [i for i, (s, _) in enumerate(order) if s == "transcribe"]
+    translate_idxs = [i for i, (s, _) in enumerate(order) if s == "translate"]
+    assert transcribe_idxs
+    assert translate_idxs
+    assert max(transcribe_idxs) < min(translate_idxs)
+
+    summarize_idxs = [i for i, (s, _) in enumerate(order) if s == "summarize"]
+    extract_idxs = [i for i, (s, _) in enumerate(order) if s == "extract"]
+    assert max(translate_idxs) < min(summarize_idxs)
+    assert max(summarize_idxs) < min(extract_idxs)
+
+    with Session(db_engine) as session:
+        assert session.get(FileRecord, record_a.id).status == "done"
+        assert session.get(FileRecord, record_b.id).status == "done"

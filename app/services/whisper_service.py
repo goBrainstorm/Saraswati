@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import importlib.util
 import logging
 import os
 import subprocess
@@ -11,6 +12,25 @@ from typing import Optional
 from app.config import settings
 
 logger = logging.getLogger(__name__)
+
+
+def _prepend_nvidia_pip_libs_to_ld_path() -> None:
+    """Put pip-installed CUDA libs (e.g. nvidia-cublas-cu12) on LD_LIBRARY_PATH.
+
+    ctranslate2 loads libcublas on first GPU use; without this, inference can fail
+    with 'libcublas.so.12 is not found' even when the NVIDIA driver works.
+    """
+    spec = importlib.util.find_spec("nvidia.cublas.lib")
+    if not spec or not spec.submodule_search_locations:
+        return
+    lib_dir = next(iter(spec.submodule_search_locations))
+    if not lib_dir or not os.path.isdir(lib_dir):
+        return
+    old = os.environ.get("LD_LIBRARY_PATH", "")
+    parts = [p for p in old.split(":") if p]
+    if lib_dir in parts:
+        return
+    os.environ["LD_LIBRARY_PATH"] = f"{lib_dir}:{old}" if old else lib_dir
 
 _model: Optional[object] = None  # WhisperModel, typed as object to avoid import at module level
 _current_model_name: Optional[str] = None
@@ -34,7 +54,8 @@ def _resolve_whisper_device() -> str:
     if mode == "cpu":
         return "cpu"
     if mode == "cuda":
-        return "cuda"
+        # After a missing-lib GPU failure we load on CPU even if user asked for cuda.
+        return "cpu" if _whisper_gpu_broken else "cuda"
     # auto
     if _whisper_gpu_broken:
         return "cpu"
@@ -58,6 +79,7 @@ def _get_model():
     except Exception:
         desired = settings.whisper_model
     if _model is None or _current_model_name != desired:
+        _prepend_nvidia_pip_libs_to_ld_path()
         from faster_whisper import WhisperModel
 
         device = _resolve_whisper_device()
@@ -171,14 +193,13 @@ def _transcribe_sync(local_path: str) -> tuple[str, str]:
             )
         except RuntimeError as exc:
             if (
-                settings.whisper_device == "auto"
-                and not _whisper_gpu_broken
+                not _whisper_gpu_broken
                 and _is_likely_missing_gpu_runtime(exc)
                 and _resolve_whisper_device() == "cuda"
             ):
                 logger.warning(
                     "Whisper GPU inference failed (%s). Reloading model on CPU. "
-                    "Install CUDA 12.x cuBLAS or set WHISPER_DEVICE=cpu to skip GPU.",
+                    "Install CUDA 12 cuBLAS (e.g. pip install nvidia-cublas-cu12) or set WHISPER_DEVICE=cpu.",
                     exc,
                 )
                 _whisper_gpu_broken = True

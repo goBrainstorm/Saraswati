@@ -9,7 +9,7 @@ from sqlmodel import Session
 pytestmark = pytest.mark.asyncio(loop_scope="module")
 
 from app.models import FileRecord
-from app.queue import _queue, drain_queue, enqueue
+from app.queue import _queue, drain_queue, enqueue, get_queue_snapshot, reset_processing_queue
 
 
 def _make_record(tmp_path) -> FileRecord:
@@ -24,25 +24,24 @@ def _make_record(tmp_path) -> FileRecord:
 
 async def test_enqueue_puts_item_on_queue(db_engine):
     """enqueue() is non-blocking and puts the file_id on the module-level queue."""
-    # Drain any pre-existing items from prior test runs
-    while not _queue.empty():
-        _queue.get_nowait()
-        _queue.task_done()
+    reset_processing_queue()
 
     file_id = uuid.uuid4()
     assert _queue.empty()
     enqueue(file_id)
     assert _queue.qsize() == 1
+    snap = get_queue_snapshot()
+    assert snap["waiting_file_ids"] == [file_id]
+    assert snap["current_file_id"] is None
     item = _queue.get_nowait()
     _queue.task_done()
     assert item == file_id
+    reset_processing_queue()
 
 
 async def test_drain_queue_processes_one_file(db_engine, db_session: Session, tmp_path):
     """drain_queue() picks up a file_id and runs the pipeline (which fails for missing file)."""
-    while not _queue.empty():
-        _queue.get_nowait()
-        _queue.task_done()
+    reset_processing_queue()
 
     record = _make_record(tmp_path)
     db_session.add(record)
@@ -66,9 +65,7 @@ async def test_drain_queue_processes_one_file(db_engine, db_session: Session, tm
 
 async def test_drain_queue_continues_after_failure(db_engine, db_session: Session, tmp_path):
     """drain_queue() processes subsequent files even when one fails."""
-    while not _queue.empty():
-        _queue.get_nowait()
-        _queue.task_done()
+    reset_processing_queue()
 
     record_a = _make_record(tmp_path)
     record_b = _make_record(tmp_path)

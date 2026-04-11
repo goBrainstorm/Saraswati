@@ -13,6 +13,11 @@ logger = logging.getLogger(__name__)
 _subscribers: list[asyncio.Queue[str]] = []
 
 
+def subscriber_count() -> int:
+    """Number of active SSE connections (each has its own asyncio.Queue)."""
+    return len(_subscribers)
+
+
 def emit(file_id: UUID, event: dict) -> None:
     """Broadcast a JSON event to every active SSE subscriber."""
     payload = json.dumps({"file_id": str(file_id), **event})

@@ -2,11 +2,15 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections import deque
 from uuid import UUID
 
 logger = logging.getLogger(__name__)
 
 _queue: asyncio.Queue[UUID] = asyncio.Queue()
+# FIFO mirror of IDs still inside asyncio.Queue (Queue has no public peek API).
+_waiting_ids: deque[UUID] = deque()
+_current_file_id: UUID | None = None
 
 # DB statuses that each stage requires before it will do any work.
 # If the file is not in one of these statuses the stage function returns None
@@ -22,7 +26,26 @@ _STAGE_PRECONDITIONS: dict[str, frozenset[str]] = {
 def enqueue(file_id: UUID) -> None:
     """Put file_id onto the processing queue (non-blocking)."""
     _queue.put_nowait(file_id)
+    _waiting_ids.append(file_id)
     logger.info("Enqueued file_id=%s.", file_id)
+
+
+def get_queue_snapshot() -> dict:
+    """Return waiting file IDs (FIFO) and the file currently being processed, if any."""
+    return {
+        "waiting_file_ids": list(_waiting_ids),
+        "current_file_id": _current_file_id,
+    }
+
+
+def reset_processing_queue() -> None:
+    """Drop all items from the asyncio queue and clear mirror state. For tests."""
+    global _current_file_id
+    while not _queue.empty():
+        _queue.get_nowait()
+        _queue.task_done()
+    _waiting_ids.clear()
+    _current_file_id = None
 
 
 async def process_single_file(file_id: UUID) -> None:
@@ -76,10 +99,16 @@ async def process_single_file(file_id: UUID) -> None:
 
 async def drain_queue() -> None:
     """Background coroutine — drains the queue one file at a time. Never exits."""
+    global _current_file_id
     logger.info("Queue drain coroutine started.")
     while True:
         file_id = await _queue.get()
+        if _waiting_ids and _waiting_ids[0] == file_id:
+            _waiting_ids.popleft()
+        elif file_id in _waiting_ids:
+            _waiting_ids.remove(file_id)
         try:
+            _current_file_id = file_id
             await process_single_file(file_id)
         except Exception as exc:
             logger.error(
@@ -89,4 +118,5 @@ async def drain_queue() -> None:
                 exc_info=True,
             )
         finally:
+            _current_file_id = None
             _queue.task_done()

@@ -63,3 +63,49 @@ async def test_status_table_html(client: AsyncClient, session: Session):
     assert response.status_code == 200
     assert "html_test.mp3" in response.text
     assert "<" in response.text # rough check for HTML
+
+
+@pytest.mark.asyncio
+async def test_queues_json_empty(client: AsyncClient):
+    from app.queue import reset_processing_queue
+
+    reset_processing_queue()
+    response = await client.get("/api/status/queues")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["processing"]["waiting"] == []
+    assert data["processing"]["current"] is None
+    assert isinstance(data["sse"]["subscribers"], int)
+
+
+@pytest.mark.asyncio
+async def test_queues_json_waiting_filename(client: AsyncClient, session: Session):
+    from app.queue import enqueue, reset_processing_queue
+
+    reset_processing_queue()
+    record = FileRecord(
+        filename="queued.m4a",
+        sha256="queuesnapsha",
+        status="pending",
+        uploaded_at=datetime.datetime.now(datetime.timezone.utc),
+        local_path="/tmp/queued.m4a",
+    )
+    session.add(record)
+    session.commit()
+    enqueue(record.id)
+
+    response = await client.get("/api/status/queues")
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data["processing"]["waiting"]) == 1
+    assert data["processing"]["waiting"][0]["filename"] == "queued.m4a"
+    assert data["processing"]["waiting"][0]["id"] == str(record.id)
+    reset_processing_queue()
+
+
+@pytest.mark.asyncio
+async def test_queues_panel_html(client: AsyncClient):
+    response = await client.get("/api/status/queues/panel")
+    assert response.status_code == 200
+    assert "Pipeline queue" in response.text
+    assert "SSE subscribers" in response.text

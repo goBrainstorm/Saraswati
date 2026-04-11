@@ -96,9 +96,12 @@ async def index(request: Request) -> HTMLResponse:
 # Entry point
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
+    # HOST is the generic bind address (e.g. 0.0.0.0 in Docker). If left at default,
+    # use TAILSCALE_HOST so a Tailscale IP in .env still applies when HOST is unset.
+    bind_host = settings.host if settings.host != "127.0.0.1" else settings.tailscale_host
     uvicorn.run(
         "main:app",
-        host=settings.tailscale_host,
+        host=bind_host,
         port=settings.port,
         reload=False,
         log_level="info",

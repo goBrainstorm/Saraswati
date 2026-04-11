@@ -17,6 +17,8 @@ class FileRecord(SQLModel, table=True):
     sha256: str = Field(unique=True, index=True)
     status: str = Field(default="pending")  # pending | processing | done | failed
     uploaded_at: datetime = Field(default_factory=_utcnow)
+    # When the source file was last modified: browser File.lastModified and/or embedded tags
+    source_modified_at: Optional[datetime] = Field(default=None)
     processed_at: Optional[datetime] = Field(default=None)
     local_path: str
     nextcloud_path: Optional[str] = Field(default=None)

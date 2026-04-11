@@ -11,15 +11,16 @@ services:
       - ./data:/app/data
     env_file:
       - .env
+    # Override host .env: inside the container, localhost is not the host machine, and a
+    # Tailscale IP from TAILSCALE_HOST is not assigned to the container (binding fails → exit 1).
+    environment:
+      HOST: "0.0.0.0"
+      QDRANT_URL: "http://qdrant:6333"
     depends_on:
       - qdrant
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
+    # GPU (Whisper): `deploy` is ignored by `docker compose up` (non-Swarm). Use one of:
+    #   docker compose run --gpus all app
+    # or add `gpus: all` here if nvidia-container-toolkit is installed (omit on CPU-only hosts).
 
   qdrant:
     image: qdrant/qdrant:latest

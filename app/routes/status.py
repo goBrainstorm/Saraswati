@@ -12,7 +12,8 @@ from sqlmodel import select
 
 from app.database import get_session
 from app.models import Entry, FileRecord
-from app.sse import stream_response
+from app.queue import get_queue_snapshot
+from app.sse import stream_response, subscriber_count
 from app.templates_env import templates
 
 logger = logging.getLogger(__name__)
@@ -59,6 +60,62 @@ async def status_table(request: Request) -> HTMLResponse:
 async def status_stream() -> StreamingResponse:
     """SSE stream — yields stage-progress events for all active pipeline runs."""
     return stream_response()
+
+
+def _filenames_for_ids(ids: List[UUID]) -> Dict[UUID, str]:
+    """Map file IDs to filenames; missing rows get a short placeholder."""
+    if not ids:
+        return {}
+    with get_session() as session:
+        out: Dict[UUID, str] = {}
+        for uid in ids:
+            rec = session.get(FileRecord, uid)
+            out[uid] = rec.filename if rec else f"(unknown {str(uid)[:8]}…)"
+        return out
+
+
+@router.get("/api/status/queues")
+async def get_queues_status() -> Dict[str, Any]:
+    """JSON snapshot: pipeline asyncio queue (waiting + current) and SSE subscriber queues."""
+    snap = get_queue_snapshot()
+    waiting_ids: List[UUID] = list(snap["waiting_file_ids"])
+    current_id: Optional[UUID] = snap["current_file_id"]
+    all_ids = waiting_ids[:]
+    if current_id is not None:
+        all_ids.append(current_id)
+    names = _filenames_for_ids(all_ids)
+
+    waiting = [{"id": str(uid), "filename": names.get(uid, "?")} for uid in waiting_ids]
+    current = None
+    if current_id is not None:
+        current = {
+            "id": str(current_id),
+            "filename": names.get(current_id, "?"),
+        }
+
+    return {
+        "processing": {
+            "waiting": waiting,
+            "current": current,
+        },
+        "sse": {
+            "subscribers": subscriber_count(),
+        },
+    }
+
+
+@router.get("/api/status/queues/panel", response_class=HTMLResponse)
+async def queues_panel(request: Request) -> HTMLResponse:
+    """HTMX fragment: pipeline queue + SSE queue counts."""
+    data = await get_queues_status()
+    return templates.TemplateResponse(
+        request,
+        "partials/queue_panel.html",
+        {
+            "processing": data["processing"],
+            "sse_subscribers": data["sse"]["subscribers"],
+        },
+    )
 
 
 @router.get("/api/status/{file_id}")

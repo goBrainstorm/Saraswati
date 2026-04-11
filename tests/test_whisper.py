@@ -131,11 +131,18 @@ def test_transcribe_sync_falls_back_to_cpu_on_cublas_error(tmp_path, monkeypatch
     assert whisper_service._whisper_gpu_broken is True
 
 
-def test_transcribe_sync_no_cpu_fallback_when_whisper_device_cuda(tmp_path, monkeypatch):
+def test_transcribe_sync_falls_back_to_cpu_on_cublas_error_when_whisper_device_cuda(
+    tmp_path, monkeypatch,
+):
     audio_file = tmp_path / "sample.mp3"
     audio_file.write_bytes(b"FAKE_AUDIO_DATA")
 
     monkeypatch.setattr(whisper_service.settings, "whisper_device", "cuda")
+    monkeypatch.setattr(whisper_service, "_whisper_gpu_broken", False)
+    monkeypatch.setattr(whisper_service, "_model", None)
+    monkeypatch.setattr(whisper_service, "_current_model_name", None)
+
+    n = {"get_model": 0}
 
     class _BadGpu:
         def transcribe(self, path, **kwargs):
@@ -143,8 +150,20 @@ def test_transcribe_sync_no_cpu_fallback_when_whisper_device_cuda(tmp_path, monk
                 "Library libcublas.so.12 is not found or cannot be loaded"
             )
 
-    monkeypatch.setattr(whisper_service, "_preprocess_audio", lambda p: (p, False))
-    monkeypatch.setattr(whisper_service, "_get_model", lambda: _BadGpu())
+    class _OkCpu:
+        def transcribe(self, path, **kwargs):
+            return [SimpleNamespace(text="ok")], SimpleNamespace(language="pl")
 
-    with pytest.raises(RuntimeError, match="libcublas"):
-        whisper_service._transcribe_sync(str(audio_file))
+    def fake_get_model():
+        n["get_model"] += 1
+        return _BadGpu() if n["get_model"] == 1 else _OkCpu()
+
+    monkeypatch.setattr(whisper_service, "_preprocess_audio", lambda p: (p, False))
+    monkeypatch.setattr(whisper_service, "_get_model", fake_get_model)
+
+    text, lang = whisper_service._transcribe_sync(str(audio_file))
+
+    assert text == "ok"
+    assert lang == "pl"
+    assert n["get_model"] == 2
+    assert whisper_service._whisper_gpu_broken is True

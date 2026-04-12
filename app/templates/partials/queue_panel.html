@@ -1,0 +1,31 @@
+<div class="queue-window">
+  <div class="queue-window-col">
+    <h3 class="queue-window-title">Pipeline queue</h3>
+    <p class="queue-window-meta">
+      {% if processing.current %}
+        <span class="queue-label">Running</span>
+        <span class="queue-current" title="{{ processing.current.id }}">{{ processing.current.filename }}</span>
+      {% else %}
+        <span class="queue-muted">Idle (no file running)</span>
+      {% endif %}
+    </p>
+    <div class="queue-window-sub">Waiting (FIFO)</div>
+    {% if processing.waiting %}
+      <ul class="queue-id-list">
+        {% for row in processing.waiting %}
+          <li title="{{ row.id }}">{{ row.filename }}</li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="queue-muted queue-empty">Empty</p>
+    {% endif %}
+  </div>
+  <div class="queue-window-col">
+    <h3 class="queue-window-title">SSE subscribers</h3>
+    <p class="queue-window-meta">
+      <span class="queue-label">Connected clients</span>
+      <span class="queue-count">{{ sse_subscribers }}</span>
+    </p>
+    <p class="queue-hint">Each browser tab with this page open holds one event-stream queue.</p>
+  </div>
+</div>

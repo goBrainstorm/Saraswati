@@ -4,13 +4,16 @@ from typing import Any, Dict, List, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response
-from fastapi.responses import JSONResponse
 from fastapi.responses import HTMLResponse
+from fastapi.responses import JSONResponse
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlmodel import select
 
 from app.database import get_session
 from app.models import Entry, FileRecord
+from app.queue import get_queue_snapshot
+from app.sse import stream_response, subscriber_count
 from app.templates_env import templates
 
 logger = logging.getLogger(__name__)
@@ -50,6 +53,68 @@ async def status_table(request: Request) -> HTMLResponse:
         request,
         "partials/status_table.html",
         {"records": records},
+    )
+
+
+@router.get("/api/status/stream")
+async def status_stream() -> StreamingResponse:
+    """SSE stream — yields stage-progress events for all active pipeline runs."""
+    return stream_response()
+
+
+def _filenames_for_ids(ids: List[UUID]) -> Dict[UUID, str]:
+    """Map file IDs to filenames; missing rows get a short placeholder."""
+    if not ids:
+        return {}
+    with get_session() as session:
+        out: Dict[UUID, str] = {}
+        for uid in ids:
+            rec = session.get(FileRecord, uid)
+            out[uid] = rec.filename if rec else f"(unknown {str(uid)[:8]}…)"
+        return out
+
+
+@router.get("/api/status/queues")
+async def get_queues_status() -> Dict[str, Any]:
+    """JSON snapshot: pipeline asyncio queue (waiting + current) and SSE subscriber queues."""
+    snap = get_queue_snapshot()
+    waiting_ids: List[UUID] = list(snap["waiting_file_ids"])
+    current_id: Optional[UUID] = snap["current_file_id"]
+    all_ids = waiting_ids[:]
+    if current_id is not None:
+        all_ids.append(current_id)
+    names = _filenames_for_ids(all_ids)
+
+    waiting = [{"id": str(uid), "filename": names.get(uid, "?")} for uid in waiting_ids]
+    current = None
+    if current_id is not None:
+        current = {
+            "id": str(current_id),
+            "filename": names.get(current_id, "?"),
+        }
+
+    return {
+        "processing": {
+            "waiting": waiting,
+            "current": current,
+        },
+        "sse": {
+            "subscribers": subscriber_count(),
+        },
+    }
+
+
+@router.get("/api/status/queues/panel", response_class=HTMLResponse)
+async def queues_panel(request: Request) -> HTMLResponse:
+    """HTMX fragment: pipeline queue + SSE queue counts."""
+    data = await get_queues_status()
+    return templates.TemplateResponse(
+        request,
+        "partials/queue_panel.html",
+        {
+            "processing": data["processing"],
+            "sse_subscribers": data["sse"]["subscribers"],
+        },
     )
 
 
@@ -135,7 +200,9 @@ async def batch_delete(body: BatchIdsBody) -> JSONResponse:
 @router.post("/api/status/batch-reset")
 async def batch_reset(body: BatchIdsBody) -> JSONResponse:
     """Reset multiple FileRecords to pending status and remove their Entries."""
-    count = 0
+    from app import queue as _queue_module
+
+    reset_ids: list[UUID] = []
     with get_session() as session:
         for file_id in body.ids:
             record = session.get(FileRecord, file_id)
@@ -152,8 +219,12 @@ async def batch_reset(body: BatchIdsBody) -> JSONResponse:
                 session.delete(entry)
 
             session.add(record)
-            count += 1
+            reset_ids.append(file_id)
 
         session.commit()
 
-    return JSONResponse({"count": count})
+    # Enqueue after commit so the drain coroutine sees status="pending" in the DB.
+    for file_id in reset_ids:
+        _queue_module.enqueue(file_id)
+
+    return JSONResponse({"count": len(reset_ids)})

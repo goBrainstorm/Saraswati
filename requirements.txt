@@ -6,9 +6,12 @@ python-dotenv
 pydantic-settings
 httpx
 python-multipart
+mutagen
 jinja2
 aiofiles
 faster-whisper
+# CUDA 12 cuBLAS for GPU faster-whisper (Linux); harmless if unused
+nvidia-cublas-cu12>=12.1.0; platform_system == "Linux"
 sentence-transformers
 qdrant-client
 

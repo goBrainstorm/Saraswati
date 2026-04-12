@@ -236,6 +236,80 @@
     }
 
     /* ------------------------------------------------------------------ */
+    /* Queue window (pipeline + SSE)                                       */
+    /* ------------------------------------------------------------------ */
+    .queue-window {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1.25rem;
+    }
+    @media (max-width: 640px) {
+      .queue-window { grid-template-columns: 1fr; }
+    }
+    .queue-window-col {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1rem 1.1rem;
+    }
+    .queue-window-title {
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+      font-weight: 600;
+      margin-bottom: 0.6rem;
+    }
+    .queue-window-meta {
+      font-size: 0.875rem;
+      margin-bottom: 0.75rem;
+      line-height: 1.5;
+    }
+    .queue-window-sub {
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--muted);
+      margin-bottom: 0.35rem;
+    }
+    .queue-label {
+      color: var(--muted);
+      margin-right: 0.35rem;
+    }
+    .queue-current {
+      font-weight: 500;
+      word-break: break-word;
+    }
+    .queue-count {
+      font-weight: 600;
+      color: var(--accent);
+    }
+    .queue-muted {
+      color: var(--muted);
+      font-size: 0.875rem;
+    }
+    .queue-empty {
+      margin: 0;
+    }
+    .queue-id-list {
+      margin: 0;
+      padding-left: 1.1rem;
+      font-size: 0.85rem;
+      max-height: 200px;
+      overflow-y: auto;
+    }
+    .queue-id-list li {
+      margin-bottom: 0.25rem;
+      word-break: break-word;
+    }
+    .queue-hint {
+      font-size: 0.78rem;
+      color: var(--muted);
+      margin: 0;
+      line-height: 1.45;
+    }
+
+    /* ------------------------------------------------------------------ */
     /* Process trigger row                                                 */
     /* ------------------------------------------------------------------ */
     .trigger-row {
@@ -352,6 +426,27 @@
     </section>
 
     <!-- ---------------------------------------------------------------- -->
+    <!-- Queue monitor                                                     -->
+    <!-- ---------------------------------------------------------------- -->
+    <section>
+      <h2>
+        Queues
+        <span class="htmx-indicator" id="queue-spinner" style="font-size:0.75rem; color:var(--muted); font-weight:400; letter-spacing:0; text-transform:none; margin-left:0.5rem;">
+          refreshing<span class="spinner"></span>
+        </span>
+      </h2>
+      <div
+        id="queue-panel"
+        hx-get="/api/status/queues/panel"
+        hx-trigger="load, every 5s"
+        hx-swap="innerHTML"
+        hx-indicator="#queue-spinner"
+      >
+        <p style="color:var(--muted); font-size:0.875rem;">Loading...</p>
+      </div>
+    </section>
+
+    <!-- ---------------------------------------------------------------- -->
     <!-- File status section                                               -->
     <!-- ---------------------------------------------------------------- -->
     <section>
@@ -460,7 +555,14 @@
           try {
             const fd = new FormData();
             fd.append('file', files[i]);
-            const resp = await fetch('/api/upload', { method: 'POST', body: fd });
+            fd.append('source_last_modified_ms', String(files[i].lastModified));
+            const resp = await fetch('/api/upload', {
+              method: 'POST',
+              body: fd,
+              headers: {
+                'X-Source-Last-Modified-Ms': String(files[i].lastModified),
+              },
+            });
             if (resp.ok) {
               badge.className = 'badge badge-done';
               badge.textContent = 'done';
@@ -607,6 +709,18 @@
         if (typeof htmx !== 'undefined') htmx.trigger('#status-panel', 'load');
       }
     }
+
+    // SSE — refresh status table and queue panel on pipeline events
+    (function () {
+      var es = new EventSource('/api/status/stream');
+      es.onmessage = function () {
+        if (typeof htmx !== 'undefined') {
+          htmx.trigger(document.getElementById('status-panel'), 'load');
+          var qp = document.getElementById('queue-panel');
+          if (qp) htmx.trigger(qp, 'load');
+        }
+      };
+    })();
   </script>
 </body>
 </html>

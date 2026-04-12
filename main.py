@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import sys
 from contextlib import asynccontextmanager
@@ -11,6 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from app.config import settings
 from app.database import create_db_and_tables
 from app.templates_env import templates
+from app.queue import drain_queue
 from app.routes import entries, models_config as models_config_route, process, prompts, settings as settings_route, status, upload
 from app.scheduler import start_scheduler, stop_scheduler
 from app.services.model_config import seed_model_configs
@@ -48,6 +50,10 @@ async def lifespan(app: FastAPI):
 
     # Start background scheduler
     start_scheduler()
+
+    # Start queue drain coroutine (disabled when QUEUE_DRAIN_ENABLED=false, e.g. tests)
+    if settings.queue_drain_enabled:
+        asyncio.create_task(drain_queue())
 
     yield
 
@@ -90,9 +96,12 @@ async def index(request: Request) -> HTMLResponse:
 # Entry point
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
+    # HOST is the generic bind address (e.g. 0.0.0.0 in Docker). If left at default,
+    # use TAILSCALE_HOST so a Tailscale IP in .env still applies when HOST is unset.
+    bind_host = settings.host if settings.host != "127.0.0.1" else settings.tailscale_host
     uvicorn.run(
         "main:app",
-        host=settings.tailscale_host,
+        host=bind_host,
         port=settings.port,
         reload=False,
         log_level="info",

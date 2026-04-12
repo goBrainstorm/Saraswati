@@ -256,12 +256,22 @@ async def run_extraction_and_finalize(file_id: UUID) -> Optional[str]:
     return None
 
 
-async def process_pending_files() -> dict:
+async def process_pending_files(emit_sse: bool = False) -> dict:
     """Run pipeline in horizontal batches; each stage processes all eligible files.
+
+    When ``emit_sse`` is True (e.g. queue drain), broadcast stage events compatible with
+    :func:`app.queue.drain_queue` / the status SSE stream.
 
     Returns:
         Dict with keys: attempted, succeeded, failed, errors (list of {filename, error}).
     """
+    if emit_sse:
+        from app.sse import emit as sse_emit
+    else:
+
+        def sse_emit(_fid: UUID, _payload: dict) -> None:  # type: ignore[misc]
+            pass
+
     with get_session() as session:
         pending = session.exec(
             select(FileRecord).where(FileRecord.status == "pending")
@@ -309,11 +319,14 @@ async def process_pending_files() -> dict:
 
     for fid in pending_ids:
         attempted_ids.add(fid)
+        sse_emit(fid, {"stage": "transcribe", "status": "start"})
         error = await run_transcription(fid)
         if error:
+            sse_emit(fid, {"stage": "transcribe", "status": "failed", "error": error})
             errors.append({"filename": str(fid), "error": error})
             failed += 1
         else:
+            sse_emit(fid, {"stage": "transcribe", "status": "done"})
             succeeded += 1
 
     with get_session() as session:
@@ -324,22 +337,24 @@ async def process_pending_files() -> dict:
 
     from app.services.llm import check_llm_server_ready
 
-    llm_skip = await check_llm_server_ready("translate")
-    if llm_skip:
+    llm_probe = await check_llm_server_ready("translate")
+    if llm_probe:
         logger.warning(
-            "Skipping translation for %d file(s): %s",
+            "Translate server probe: %s — running translation for %d file(s) anyway.",
+            llm_probe,
             len(transcribed_ids),
-            llm_skip,
         )
-    else:
-        for fid in transcribed_ids:
-            attempted_ids.add(fid)
-            error = await run_translation(fid)
-            if error:
-                errors.append({"filename": str(fid), "error": error})
-                failed += 1
-            else:
-                succeeded += 1
+    for fid in transcribed_ids:
+        attempted_ids.add(fid)
+        sse_emit(fid, {"stage": "translate", "status": "start"})
+        error = await run_translation(fid)
+        if error:
+            sse_emit(fid, {"stage": "translate", "status": "failed", "error": error})
+            errors.append({"filename": str(fid), "error": error})
+            failed += 1
+        else:
+            sse_emit(fid, {"stage": "translate", "status": "done"})
+            succeeded += 1
 
     with get_session() as session:
         translated = session.exec(
@@ -347,22 +362,24 @@ async def process_pending_files() -> dict:
         ).all()
         translated_ids = [r.id for r in translated]
 
-    llm_skip = await check_llm_server_ready("summarize")
-    if llm_skip:
+    llm_probe = await check_llm_server_ready("summarize")
+    if llm_probe:
         logger.warning(
-            "Skipping summarization for %d file(s): %s",
+            "Summarize server probe: %s — running summarization for %d file(s) anyway.",
+            llm_probe,
             len(translated_ids),
-            llm_skip,
         )
-    else:
-        for fid in translated_ids:
-            attempted_ids.add(fid)
-            error = await run_summarization(fid)
-            if error:
-                errors.append({"filename": str(fid), "error": error})
-                failed += 1
-            else:
-                succeeded += 1
+    for fid in translated_ids:
+        attempted_ids.add(fid)
+        sse_emit(fid, {"stage": "summarize", "status": "start"})
+        error = await run_summarization(fid)
+        if error:
+            sse_emit(fid, {"stage": "summarize", "status": "failed", "error": error})
+            errors.append({"filename": str(fid), "error": error})
+            failed += 1
+        else:
+            sse_emit(fid, {"stage": "summarize", "status": "done"})
+            succeeded += 1
 
     with get_session() as session:
         summarized = session.exec(
@@ -370,22 +387,25 @@ async def process_pending_files() -> dict:
         ).all()
         summarized_ids = [r.id for r in summarized]
 
-    llm_skip = await check_llm_server_ready("extract")
-    if llm_skip:
+    llm_probe = await check_llm_server_ready("extract")
+    if llm_probe:
         logger.warning(
-            "Skipping extraction/finalize for %d file(s): %s",
+            "Extract server probe: %s — running extraction/finalize for %d file(s) anyway.",
+            llm_probe,
             len(summarized_ids),
-            llm_skip,
         )
-    else:
-        for fid in summarized_ids:
-            attempted_ids.add(fid)
-            error = await run_extraction_and_finalize(fid)
-            if error:
-                errors.append({"filename": str(fid), "error": error})
-                failed += 1
-            else:
-                succeeded += 1
+    for fid in summarized_ids:
+        attempted_ids.add(fid)
+        sse_emit(fid, {"stage": "extract", "status": "start"})
+        error = await run_extraction_and_finalize(fid)
+        if error:
+            sse_emit(fid, {"stage": "extract", "status": "failed", "error": error})
+            errors.append({"filename": str(fid), "error": error})
+            failed += 1
+        else:
+            sse_emit(fid, {"stage": "extract", "status": "done"})
+            sse_emit(fid, {"stage": "pipeline", "status": "complete"})
+            succeeded += 1
 
     return {
         "attempted": len(attempted_ids),

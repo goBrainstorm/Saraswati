@@ -4,6 +4,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Current implementation snapshot:** see [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) for what is built vs still open (keeps context small versus reading [ROADMAP.md](ROADMAP.md) in full).
 
+**Pipeline queue and batching:** see [docs/queue-pipeline-batching.md](docs/queue-pipeline-batching.md) for how the upload-driven async queue matches `POST /api/process` (horizontal stages), debounce/coalescing, SSE, and LLM probe behavior. **If you (the user) have not reviewed it recently and the task touches uploads, `app/queue.py`, or `process_pending_files`, the assistant should remind you to read that doc.**
+
 ## Commands
 
 ```bash
@@ -37,9 +39,9 @@ This is a **FastAPI personal knowledge base**. Phases 1–2 and most of the inge
 
 **`app/database.py`**: SQLite engine + session context manager. Use `get_session()` as a context manager for all DB access.
 
-**`app/scheduler.py`**: APScheduler instance with two jobs:
-- `pipeline_job` — fires per `SCHEDULE_CRON` (default `0 3 * * *`). Runs `process_pending_files()` and refreshes the short-term cache (`app/services/cache.py`).
-- `cleanup_job` — fires daily at 04:00. Delegates to `app/services/cleanup.py`.
+**`app/scheduler.py`**: APScheduler — `cleanup_job` daily at 04:00 (`app/services/cleanup.py`). Ingestion runs via **`app/queue.py`** `drain_queue()` (after upload) and **`POST /api/process`** (manual); see [docs/queue-pipeline-batching.md](docs/queue-pipeline-batching.md).
+
+**`app/queue.py`**: `asyncio` queue + `drain_queue()` — coalesces upload notifications, optional debounce (`QUEUE_COALESCE_DEBOUNCE_SECONDS`), calls `process_pending_files(emit_sse=True)`.
 
 **`app/routes/`** — includes:
 - `upload.py` — `POST /api/upload`: multipart audio, SHA-256 dedup, saves under `input/`, creates `FileRecord(status="pending")`.

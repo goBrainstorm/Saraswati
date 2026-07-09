@@ -9,7 +9,7 @@
 - **Ingestion:** Multipart upload, local `input/` storage, SHA-256 dedup
 - **Pipeline:** faster-whisper (ffmpeg normalization, optional denoise by size), llama-server OpenAI-compatible `/v1/chat/completions` for translate / summarize / extract
 - **Vector store:** Qdrant + sentence-transformers (`all-MiniLM-L6-v2`) upsert on successful pipeline completion
-- **Optional:** Nextcloud WebDAV archive; APScheduler for scheduled pipeline + daily cleanup
+- **APScheduler** is wired into lifespan but currently has no scheduled jobs
 
 ## Implemented today
 
@@ -32,7 +32,7 @@
 
 ### Pipeline (`app/services/pipeline.py`)
 
-- Stages: transcribe → translate → summarize → extract → Qdrant upsert (non-fatal) → mark `done` → Nextcloud upload (non-fatal)
+- Stages: transcribe → translate → summarize → extract → Qdrant upsert (non-fatal) → mark `done`
 - **Resume:** `process_pending_files()` selects `status IN ('pending','transcribed','translated','summarized')`. Partial LLM failures leave prior fields persisted and retry on next run (no typed `LLMUnavailableError`; generic exceptions on translate/summarize/extract).
 - **Whisper failure** on a fresh file sets `failed` (see pipeline error handling).
 
@@ -40,17 +40,13 @@
 
 - `**app/services/cache.py`** — writes rolling ~7-day `cache/recent.json` after pipeline runs (scheduled + manual)
 - `**app/services/embedder.py**` — embed combined entry text, create collection if missing, upsert to Qdrant
-- `**app/services/cleanup.py**` — remove local files when `done`, `nextcloud_path` set, and `delete_after` passed
-- `**app/services/nextcloud.py**` — WebDAV; no-op when `NEXTCLOUD_URL` empty
-
 ### Scheduler (`app/scheduler.py`)
 
-- `pipeline_job` — runs `process_pending_files()` + `write_recent_cache()` on `SCHEDULE_CRON`
-- `cleanup_job` — daily 04:00 cleanup
+- APScheduler is started during lifespan; no scheduled jobs are currently registered
 
 ### Tests
 
-- `**tests/**` — pytest + httpx against real app and tmp SQLite (upload, status, process, cleanup, nextcloud, pipeline, whisper, llm, cache, entries, prompts, model_config, batch operations, etc.)
+- `**tests/**` — pytest + httpx against real app and tmp SQLite (upload, status, process, pipeline, whisper, llm, cache, entries, prompts, model_config, batch operations, etc.)
 
 ## Not implemented yet (see ROADMAP for detail)
 
@@ -93,9 +89,6 @@ Loaded from `.env` via `app/config.py` (`Settings`):
 | --------------------------------------------------------------------------- | ---------------------------------------------------------- |
 | `HOST`, `PORT`                                                              | Bind address                                               |
 | `DB_PATH`, `CACHE_DIR`, `INPUT_DIR`                                         | Paths                                                      |
-| `LOCAL_RETENTION_DAYS`                                                      | Days until local file eligible for cleanup after Nextcloud |
-| `SCHEDULE_CRON`                                                             | Pipeline schedule (five-field cron)                        |
-| `NEXTCLOUD_URL`, `NEXTCLOUD_USER`, `NEXTCLOUD_PASS`, `NEXTCLOUD_REMOTE_DIR` | WebDAV archive (optional)                                  |
 | `LLAMA_SERVER_URL`, `LLAMA_MODEL`                                           | Default LLM server (per-step overrides in DB)              |
 | `WHISPER_MODEL`, `WHISPER_BATCH_SIZE`, `DENOISE_MAX_MB`                     | Transcription                                              |
 | `QDRANT_URL`, `QDRANT_COLLECTION`                                           | Vector DB                                                  |

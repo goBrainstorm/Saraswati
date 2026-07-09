@@ -14,8 +14,6 @@
       <th>Source modified</th>
       <th>Uploaded</th>
       <th>Processed</th>
-      <th>Nextcloud</th>
-      <th>Delete After</th>
       <th></th>
     </tr>
   </thead>
@@ -30,8 +28,6 @@
       <td>{{ r.source_modified_at.strftime('%Y-%m-%d %H:%M') if r.source_modified_at else '—' }}</td>
       <td>{{ r.uploaded_at.strftime('%Y-%m-%d %H:%M') if r.uploaded_at else '—' }}</td>
       <td>{{ r.processed_at.strftime('%Y-%m-%d %H:%M') if r.processed_at else '—' }}</td>
-      <td>{{ r.nextcloud_path if r.nextcloud_path else '—' }}</td>
-      <td>{{ r.delete_after.strftime('%Y-%m-%d') if r.delete_after else '—' }}</td>
       <td style="text-align: right;">
         <button
           class="secondary"
@@ -45,7 +41,7 @@
     </tr>
     {% else %}
     <tr>
-      <td colspan="9" style="text-align:center; color: var(--muted);">No files uploaded yet.</td>
+      <td colspan="7" style="text-align:center; color: var(--muted);">No files uploaded yet.</td>
     </tr>
     {% endfor %}
   </tbody>

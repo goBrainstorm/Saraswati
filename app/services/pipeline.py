@@ -174,9 +174,8 @@ async def run_summarization(file_id: UUID) -> Optional[str]:
 
 
 async def run_extraction_and_finalize(file_id: UUID) -> Optional[str]:
-    """Stages 4–6: extract, embed, mark done, Nextcloud. Returns error or None."""
+    """Stages 4–6: extract, embed, mark done. Returns error or None."""
     from app.services import llm
-    from app.services.nextcloud import upload_file
 
     with get_session() as session:
         db_record = session.get(FileRecord, file_id)
@@ -184,7 +183,6 @@ async def run_extraction_and_finalize(file_id: UUID) -> Optional[str]:
             return "File not found"
         if db_record.status != "summarized":
             return None
-        local_path = db_record.local_path
         filename = db_record.filename
         existing = session.exec(
             select(Entry).where(Entry.file_id == file_id)
@@ -238,21 +236,6 @@ async def run_extraction_and_finalize(file_id: UUID) -> Optional[str]:
         session.commit()
 
     logger.info("Pipeline complete for %s (%s).", filename, file_id)
-
-    try:
-        remote_path = await upload_file(local_path, filename)
-        if remote_path:
-            with get_session() as session:
-                db_record = session.get(FileRecord, file_id)
-                db_record.nextcloud_path = remote_path
-                session.add(db_record)
-                session.commit()
-    except Exception as exc:
-        logger.warning(
-            "Nextcloud upload failed for %s: %s. File stays local.",
-            filename, exc,
-        )
-
     return None
 
 

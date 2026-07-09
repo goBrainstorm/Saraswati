@@ -20,8 +20,7 @@ The system runs on a dedicated home server, is accessible remotely over Tailscal
 | Vector Database | Qdrant (self-hosted via Docker) |
 | Relational Database | SQLite (metadata, job state, file registry) |
 | Short-term Cache | JSON or XML flat file (rolling 7-day window) |
-| Task Scheduling | APScheduler (embedded in FastAPI app) |
-| File Archiving | Nextcloud (WebDAV upload) |
+| Task Scheduling | APScheduler (embedded in FastAPI app; currently unused) |
 | Frontend | Web app — React or minimal HTML/JS/HTMX |
 | Remote Access | Tailscale (no port exposure) |
 | Chat Interface | Open WebUI (connected to llama-server + backend RAG endpoint) |
@@ -44,8 +43,7 @@ The system runs on a dedicated home server, is accessible remotely over Tailscal
       ├─ 3. Summarization     (Gemma-4-E4B via llama.cpp → summary)
       ├─ 4. Extraction        (Gemma-4-E4B via llama.cpp → structured JSON: entities, facts, tasks)
       ├─ 5. Embedding         (text vectorized → Qdrant)
-      ├─ 6. Cache Update      (short-term JSON/XML for last 7 days)
-      └─ 7. Nextcloud Upload  (raw audio archived → local file deleted after N days)
+      └─ 6. Cache Update      (short-term JSON/XML for last 7 days)
 
 [ Qdrant Vector DB ] ◄── RAG retrieval at chat time
 [ SQLite DB ]        ◄── metadata, file registry, job state
@@ -75,8 +73,6 @@ The system runs on a dedicated home server, is accessible remotely over Tailscal
 - `uploaded_at` — timestamp
 - `processed_at` — timestamp
 - `local_path` — path on server
-- `nextcloud_path` — archive path
-- `delete_after` — date to delete local file
 
 ### SQLite — `entries` table
 - `id` — UUID
@@ -105,18 +101,16 @@ The system runs on a dedicated home server, is accessible remotely over Tailscal
 
 ### Phase 1 — Foundation & Infrastructure ✅
 
-**Goal**: A running server that accepts file uploads, stores them, and has working Nextcloud archiving and cleanup.
+**Goal**: A running server that accepts file uploads, stores them, and triggers processing via a background queue.
 
 - [x] FastAPI application scaffold with SQLite database (SQLModel)
 - [x] File upload endpoint (`/api/upload`) with SHA-256 deduplication
-- [x] File registry management: track upload time, local path, deletion deadline
-- [x] Scheduled job runner (APScheduler) wired into FastAPI — configurable cron schedule (default: daily at 03:00)
-- [x] Nextcloud integration: WebDAV upload stub (skips gracefully if unconfigured)
-- [x] Local file deletion job: removes files older than N days (configurable)
+- [x] File registry management: track upload time and local path
+- [x] APScheduler wired into FastAPI lifespan (currently no scheduled jobs; processing is queue-driven)
 - [x] Tailscale access: server binds to Tailscale interface address (configure on remote deploy)
 - [x] Minimal web frontend: file upload form, processing status list, manual trigger button (HTMX)
 
-**Deliverables**: Files can be uploaded, stored, tracked and archived to Nextcloud.
+**Deliverables**: Files can be uploaded, stored, tracked, and queued for processing.
 
 #### Phase 1 — Tests (pytest + httpx AsyncClient, real SQLite in tmp dir, no mocks)
 
@@ -132,15 +126,6 @@ The system runs on a dedicated home server, is accessible remotely over Tailscal
   - [x] `GET /api/status/table` returns HTML fragment containing the filename
 - [x] `test_process.py`
   - [x] `POST /api/process` → 200, `{"status": "complete"}`
-- [x] `test_cleanup.py`
-  - [x] Ignores records with `status=pending`
-  - [x] Ignores `done` records where `nextcloud_path` is `None`
-  - [x] Ignores `done + backed_up` records where `delete_after` is in the future
-  - [x] Deletes local file when all three conditions met; DB record preserved
-  - [x] Logs warning (no crash) when local file is already absent
-- [x] `test_nextcloud.py`
-  - [x] `upload_file()` returns `""` immediately when `NEXTCLOUD_URL` is empty (no HTTP call made)
-  - [ ] (Integration, skip in CI): actual WebDAV PUT succeeds against a real Nextcloud
 
 ---
 
@@ -206,11 +191,10 @@ The system runs on a dedicated home server, is accessible remotely over Tailscal
 
 ## File & Data Retention Policy
 
-- Raw audio: kept locally for **N days** (configurable, default 7), then deleted after Nextcloud upload is confirmed
+- Raw audio: kept locally indefinitely (no automatic deletion)
 - SQLite entries: kept permanently
 - Qdrant vectors: kept permanently
 - Short-term cache (`recent.json`): rolling 7-day window, regenerated on each pipeline run
-- Nextcloud: permanent archive of all raw audio
 
 ---
 
@@ -224,12 +208,6 @@ LLAMA_MODEL             — model name for generation
 WHISPER_MODEL           — faster-whisper model name (e.g. large-v3)
 QDRANT_URL              — Qdrant server URL
 QDRANT_COLLECTION       — collection name
-NEXTCLOUD_URL           — WebDAV base URL
-NEXTCLOUD_USER          — credentials
-NEXTCLOUD_PASS          — credentials
-NEXTCLOUD_REMOTE_DIR    — remote path for audio archive
-LOCAL_RETENTION_DAYS    — days before local audio deletion (default: 7)
-SCHEDULE_CRON           — APScheduler cron expression (default: "0 3 * * *")
 TAILSCALE_HOST          — bind address (Tailscale IP)
 CACHE_DIR               — path for short-term cache files
 DB_PATH                 — SQLite file path
@@ -246,8 +224,6 @@ DB_PATH                 — SQLite file path
 3. **Hardware requirements**: Running llama.cpp with Gemma-4-E4B GGUF, Qdrant, FastAPI, and faster-whisper on the same machine requires sufficient RAM and ideally a GPU. Minimum viable: 16 GB RAM, CPU-only inference (slower). Recommended: NVIDIA GPU with 8+ GB VRAM for llama.cpp acceleration.
 
 4. **Open WebUI RAG vs custom RAG**: Open WebUI has built-in RAG. The decision of whether to use Open WebUI's internal RAG (pointing it directly at Qdrant) or route all chat through the custom `/api/chat` endpoint affects architecture complexity. Both options are viable.
-
-5. **Nextcloud auth**: WebDAV with username/password is the baseline. App passwords should be used rather than the main account credentials.
 
 ---
 
@@ -292,7 +268,7 @@ State machine change: the `files.status` column will need intermediate states be
 Add a **pipeline step log** visible in the Entries section of the frontend:
 
 - In the "Processed Entries" table, each row should have an expandable detail panel (or a link to a modal/separate view).
-- The detail panel shows a **step timeline** for that file: each pipeline stage (Transcribe, Translate, Summarize, Extract, Upload) with its status (pending / running / done / failed) and timestamp.
+- The detail panel shows a **step timeline** for that file: each pipeline stage (Transcribe, Translate, Summarize, Extract) with its status (pending / running / done / failed) and timestamp.
 - This requires a new `pipeline_steps` table in SQLite (or a JSON column on `entries`) to record per-step status and timestamps.
 - New API endpoint: `GET /api/entries/{entry_id}/steps` returns the step log for a single entry.
 - The frontend should poll or use HTMX to refresh step status while a file is in-flight.
@@ -302,7 +278,7 @@ Add a **pipeline step log** visible in the Entries section of the frontend:
 CREATE TABLE pipeline_steps (
     id       TEXT PRIMARY KEY,   -- UUID
     file_id  TEXT NOT NULL,      -- FK → files.id
-    step     TEXT NOT NULL,      -- 'transcribe' | 'translate' | 'summarize' | 'extract' | 'upload'
+    step     TEXT NOT NULL,      -- 'transcribe' | 'translate' | 'summarize' | 'extract'
     status   TEXT NOT NULL,      -- 'pending' | 'running' | 'done' | 'failed'
     started_at  TEXT,
     finished_at TEXT,

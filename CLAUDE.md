@@ -39,7 +39,7 @@ This is a **FastAPI personal knowledge base**. Phases 1–2 and most of the inge
 
 **`app/database.py`**: SQLite engine + session context manager. Use `get_session()` as a context manager for all DB access.
 
-**`app/scheduler.py`**: APScheduler — `cleanup_job` daily at 04:00 (`app/services/cleanup.py`). Ingestion runs via **`app/queue.py`** `drain_queue()` (after upload) and **`POST /api/process`** (manual); see [docs/queue-pipeline-batching.md](docs/queue-pipeline-batching.md).
+**`app/scheduler.py`**: APScheduler is wired into lifespan but currently has no scheduled jobs. Ingestion runs via **`app/queue.py`** `drain_queue()` (after upload) and **`POST /api/process`** (manual); see [docs/queue-pipeline-batching.md](docs/queue-pipeline-batching.md).
 
 **`app/queue.py`**: `asyncio` queue + `drain_queue()` — coalesces upload notifications, optional debounce (`QUEUE_COALESCE_DEBOUNCE_SECONDS`), calls `process_pending_files(emit_sse=True)`.
 
@@ -51,10 +51,8 @@ This is a **FastAPI personal knowledge base**. Phases 1–2 and most of the inge
 - `prompts.py`, `models_config.py`, `settings.py` — prompts, per-step LLM config, settings UI.
 
 **`app/services/`** (non-exhaustive):
-- `pipeline.py` — Whisper → LLM translate/summarize/extract → Qdrant upsert (non-fatal) → Nextcloud (non-fatal); granular `files.status` for resume.
+- `pipeline.py` — Whisper → LLM translate/summarize/extract → Qdrant upsert (non-fatal); granular `files.status` for resume.
 - `whisper_service.py`, `llm.py`, `embedder.py`, `cache.py` — transcription, LLM calls, embeddings/Qdrant, rolling JSON cache.
-- `cleanup.py` — deletes local files where `status=done AND nextcloud_path IS NOT NULL AND delete_after <= now`. DB row kept.
-- `nextcloud.py` — WebDAV PUT. Returns `""` if `NEXTCLOUD_URL` is empty (no HTTP).
 
 **`app/templates/`** — HTMX frontend: `index.html` at `/`, partials under `partials/`.
 
@@ -68,5 +66,4 @@ This is a **FastAPI personal knowledge base**. Phases 1–2 and most of the inge
 
 - **File deduplication** is SHA-256 content-based. Identical bytes → HTTP 409 with the existing record in the response body.
 - **Filename sanitisation**: client-supplied filenames are stripped to `Path(name).name` (basename only) before writing to disk.
-- **Nextcloud is optional**: leaving `NEXTCLOUD_URL` empty in `.env` causes all Nextcloud calls to be silent no-ops. The cleanup job will never delete a file whose `nextcloud_path` is `NULL`, so files accumulate safely without Nextcloud.
 - **Phase 4 is blocked**: Native Gemma-4-E4B audio input via llama.cpp is blocked on llama.cpp issue #21325. Do not start Phase 4 work until that issue resolves.

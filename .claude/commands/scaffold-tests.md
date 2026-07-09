@@ -11,8 +11,6 @@ Read all of these before writing any code:
 - `app/routes/upload.py` — POST /api/upload
 - `app/routes/status.py` — GET /api/status, GET /api/status/table
 - `app/routes/process.py` — POST /api/process
-- `app/services/cleanup.py` — delete_expired_files()
-- `app/services/nextcloud.py` — upload_file()
 - `main.py` — FastAPI app factory and lifespan
 
 ## Conventions (non-negotiable)
@@ -58,21 +56,6 @@ Mark the module with `pytestmark = pytest.mark.anyio`.
 
 - `test_process_trigger` — POST /api/process, assert HTTP 200, `response.json()["status"] == "triggered"`
 
-### `tests/test_cleanup.py`
-
-Call `delete_expired_files()` directly (import from `app.services.cleanup`). Build FileRecord rows directly in the tmp DB session rather than via HTTP. Use `monkeypatch` to redirect `app.database.engine` (already done by `app_client` fixture if reused, or replicate the engine patch if testing without HTTP).
-
-- `test_cleanup_ignores_pending` — FileRecord with `status="pending"`, `delete_after` 1 day ago, `nextcloud_path="remote/path"`, real file on disk; run cleanup; file still exists
-- `test_cleanup_ignores_no_nextcloud_path` — `status="done"`, `delete_after` past, `nextcloud_path=None`, real file; run cleanup; file still exists
-- `test_cleanup_ignores_future_delete_after` — `status="done"`, `nextcloud_path` set, `delete_after` = tomorrow; run cleanup; file still exists
-- `test_cleanup_deletes_eligible_file` — `status="done"`, `nextcloud_path` set, `delete_after` past, real file on disk; run cleanup; file no longer exists on disk; DB record still present (select by id to confirm)
-- `test_cleanup_missing_file_no_crash` — same eligibility as above but file is NOT on disk; run cleanup; no exception raised (exercises the `logger.warning` path)
-
-### `tests/test_nextcloud.py`
-
-- `test_nextcloud_skips_when_unconfigured` — patch `app.config.settings.nextcloud_url` to `""`; call `await upload_file("some/local/path", "file.mp3")`; assert return value is `""` and the function returns without raising (no network call is attempted because the early-return guard fires first)
-- Add a placeholder: `@pytest.mark.skip(reason="integration: requires live Nextcloud") async def test_nextcloud_real_upload(): ...`
-
 ## Dependencies
 
 Check `requirements.txt`. Add these if missing: `pytest`, `pytest-asyncio`, `anyio[trio]`, `httpx`.
@@ -85,14 +68,12 @@ asyncio_mode = auto
 
 ## Output
 
-Write all seven files:
+Write all five files:
 - `tests/__init__.py`
 - `tests/conftest.py`
 - `tests/test_upload.py`
 - `tests/test_status.py`
 - `tests/test_process.py`
-- `tests/test_cleanup.py`
-- `tests/test_nextcloud.py`
 
 After writing, activate the venv (`source .venv/bin/activate.fish` or `.venv/bin/python -m pytest`) and run `pytest tests/ -v`. Fix any failures before declaring done.
 

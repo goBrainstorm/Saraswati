@@ -1,6 +1,6 @@
 import hashlib
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated, Optional
 
@@ -107,7 +107,6 @@ async def upload_file(
         logger.info("Saved upload '%s' to '%s'.", original_name, dest_path)
 
         now = datetime.now(timezone.utc)
-        delete_after = now + timedelta(days=settings.local_retention_days)
 
         record = FileRecord(
             id=record_id,
@@ -117,7 +116,6 @@ async def upload_file(
             uploaded_at=now,
             source_modified_at=source_modified_at,
             local_path=str(dest_path),
-            delete_after=delete_after,
         )
         session.add(record)
         session.commit()

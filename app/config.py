@@ -14,12 +14,6 @@ class Settings(BaseSettings):
     cache_dir: str = Field(default="cache", alias="CACHE_DIR")
     input_dir: str = Field(default="input", alias="INPUT_DIR")
 
-    # Retention
-    local_retention_days: int = Field(default=7, alias="LOCAL_RETENTION_DAYS")
-
-    # Schedule (cron expression)
-    schedule_cron: str = Field(default="0 3 * * *", alias="SCHEDULE_CRON")
-
     # Background queue (set false in tests to avoid competing drain tasks)
     queue_drain_enabled: bool = Field(default=True, alias="QUEUE_DRAIN_ENABLED")
     # After the first dequeue, wait this long then drain the rest, so sequential
@@ -29,12 +23,6 @@ class Settings(BaseSettings):
         alias="QUEUE_COALESCE_DEBOUNCE_SECONDS",
         ge=0.0,
     )
-
-    # Nextcloud (WebDAV)
-    nextcloud_url: str = Field(default="", alias="NEXTCLOUD_URL")
-    nextcloud_user: str = Field(default="", alias="NEXTCLOUD_USER")
-    nextcloud_pass: str = Field(default="", alias="NEXTCLOUD_PASS")
-    nextcloud_remote_dir: str = Field(default="/Knowledge/Audio", alias="NEXTCLOUD_REMOTE_DIR")
 
     # LLM (Phase 2)
     llama_server_url: str = Field(default="http://localhost:8080", alias="LLAMA_SERVER_URL")

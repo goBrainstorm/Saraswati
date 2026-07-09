@@ -21,8 +21,6 @@ class FileRecord(SQLModel, table=True):
     source_modified_at: Optional[datetime] = Field(default=None)
     processed_at: Optional[datetime] = Field(default=None)
     local_path: str
-    nextcloud_path: Optional[str] = Field(default=None)
-    delete_after: Optional[datetime] = Field(default=None)
 
 
 class Entry(SQLModel, table=True):

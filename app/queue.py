@@ -30,6 +30,16 @@ def get_queue_snapshot() -> dict:
     }
 
 
+def set_current_file(file_id: UUID | None) -> None:
+    """Record the file the pipeline is actively processing, for the queue panel.
+
+    Called by :func:`app.services.pipeline.process_pending_files` as it iterates
+    files so the panel can show real progress instead of always ``None``.
+    """
+    global _current_file_id
+    _current_file_id = file_id
+
+
 def reset_processing_queue() -> None:
     """Drop all items from the asyncio queue and clear mirror state. For tests."""
     global _current_file_id

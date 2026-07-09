@@ -48,6 +48,10 @@ async def lifespan(app: FastAPI):
     # Seed default model configs (idempotent)
     seed_model_configs()
 
+    # Recover files stranded in "processing" by a previous crash/restart.
+    from app.services.pipeline import reset_stuck_processing
+    reset_stuck_processing()
+
     # Start background scheduler
     start_scheduler()
 
@@ -82,6 +86,9 @@ app.include_router(process.router)
 app.include_router(prompts.router)
 app.include_router(models_config_route.router)
 app.include_router(settings_route.router)
+
+# Serve shared static assets (e.g. the templates' stylesheet).
+app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
 
 # ---------------------------------------------------------------------------

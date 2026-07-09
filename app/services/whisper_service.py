@@ -6,6 +6,7 @@ import logging
 import os
 import subprocess
 import tempfile
+import threading
 from pathlib import Path
 from typing import Optional
 
@@ -36,6 +37,10 @@ _model: Optional[object] = None  # WhisperModel, typed as object to avoid import
 _current_model_name: Optional[str] = None
 # Set True after a ctranslate2 GPU RuntimeError so "auto" stops selecting CUDA.
 _whisper_gpu_broken: bool = False
+# Reentrant so the GPU-fallback path can reset globals under the lock and then
+# call _get_model() (which re-acquires it) without deadlocking. Guards every
+# mutation of the three module globals above against concurrent transcriptions.
+_model_lock = threading.RLock()
 
 
 def _is_likely_missing_gpu_runtime(exc: BaseException) -> bool:
@@ -78,7 +83,9 @@ def _get_model():
         desired = get_model_config("transcribe").model_name
     except Exception:
         desired = settings.whisper_model
-    if _model is None or _current_model_name != desired:
+    with _model_lock:
+        if _model is not None and _current_model_name == desired:
+            return _model
         _prepend_nvidia_pip_libs_to_ld_path()
         from faster_whisper import WhisperModel
 
@@ -202,9 +209,10 @@ def _transcribe_sync(local_path: str) -> tuple[str, str]:
                     "Install CUDA 12 cuBLAS (e.g. pip install nvidia-cublas-cu12) or set WHISPER_DEVICE=cpu.",
                     exc,
                 )
-                _whisper_gpu_broken = True
-                _model = None
-                _current_model_name = None
+                with _model_lock:
+                    _whisper_gpu_broken = True
+                    _model = None
+                    _current_model_name = None
                 model = _get_model()
                 segments, info = model.transcribe(
                     preprocessed_path,

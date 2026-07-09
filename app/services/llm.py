@@ -12,7 +12,9 @@ from app.services.prompts import get_prompt
 
 logger = logging.getLogger(__name__)
 
-_MAX_CHARS = 32_000
+# Coarse char-based cap used as a stand-in for a real token limit; configurable
+# via LLM_MAX_INPUT_CHARS. ~4 chars/token, so 32k chars ~ 8k tokens.
+_MAX_CHARS = settings.llm_max_input_chars
 
 
 async def check_llm_server_ready(step: str) -> str | None:
@@ -79,7 +81,17 @@ async def _chat(messages: list[dict], temperature: float = 0.3, step: str | None
         response = await client.post(url, json=payload)
         response.raise_for_status()
     data = response.json()
-    return data["choices"][0]["message"]["content"].strip()
+    # Validate the OpenAI-shaped response instead of blindly indexing, so a
+    # server-side error JSON or empty choices list becomes a clear, retryable
+    # error rather than a raw KeyError/IndexError.
+    try:
+        content = data["choices"][0]["message"]["content"]
+    except (KeyError, IndexError, TypeError):
+        preview = repr(data)[:300]
+        raise RuntimeError(f"Unexpected LLM response shape: {preview}")
+    if not isinstance(content, str):
+        raise RuntimeError("LLM response 'content' was missing or not a string.")
+    return content.strip()
 
 
 async def translate(text: str, source_lang: str) -> str:

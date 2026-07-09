@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     # LLM (Phase 2)
     llama_server_url: str = Field(default="http://localhost:8080", alias="LLAMA_SERVER_URL")
     llama_model: str = Field(default="gemma-4-e4b", alias="LLAMA_MODEL")
+    # Character-based safety cap on text sent to the LLM. This is a coarse proxy
+    # for a token limit (roughly 4 chars/token); inputs above it are truncated.
+    llm_max_input_chars: int = Field(default=32_000, alias="LLM_MAX_INPUT_CHARS", ge=1)
 
     # Whisper (Phase 2)
     whisper_model: str = Field(default="large-v3", alias="WHISPER_MODEL")
@@ -36,6 +39,14 @@ class Settings(BaseSettings):
     )
     whisper_batch_size: int = Field(default=8, alias="WHISPER_BATCH_SIZE", ge=1)
     denoise_max_mb: float = Field(default=100.0, alias="DENOISE_MAX_MB")
+
+    # Scheduler: minutes between automatic recent-cache refreshes. 0 disables the
+    # periodic job (the cache is still refreshed after each manual POST /api/process).
+    cache_refresh_interval_minutes: int = Field(
+        default=0,
+        alias="CACHE_REFRESH_INTERVAL_MINUTES",
+        ge=0,
+    )
 
     # Qdrant (Phase 3)
     qdrant_url: str = Field(default="http://localhost:6333", alias="QDRANT_URL")

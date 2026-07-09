@@ -19,6 +19,35 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _get_filename(file_id: UUID) -> str:
+    """Return the stored filename for a file, falling back to its id string."""
+    with get_session() as session:
+        record = session.get(FileRecord, file_id)
+        return record.filename if record else str(file_id)
+
+
+def reset_stuck_processing() -> int:
+    """Reset rows left in ``processing`` (e.g. after a crash) back to ``pending``.
+
+    ``run_transcription`` sets ``status="processing"`` while transcribing but only
+    ``pending`` rows are picked up by later batches, so a crash mid-transcription
+    would strand a file forever. Call this on startup so those files are retried.
+    Returns the number of rows reset.
+    """
+    with get_session() as session:
+        stuck = session.exec(
+            select(FileRecord).where(FileRecord.status == "processing")
+        ).all()
+        for record in stuck:
+            record.status = "pending"
+            session.add(record)
+        if stuck:
+            session.commit()
+    if stuck:
+        logger.info("Reset %d stuck 'processing' file(s) to 'pending'.", len(stuck))
+    return len(stuck)
+
+
 async def run_transcription(file_id: UUID) -> Optional[str]:
     """Stage 1: Whisper transcription. Returns error message or None on success."""
     from app.services import whisper_service
@@ -47,12 +76,23 @@ async def run_transcription(file_id: UUID) -> Optional[str]:
 
         transcription, language = await whisper_service.transcribe(local_path)
         with get_session() as session:
-            entry = Entry(
-                file_id=file_id,
-                language=language,
-                transcription=transcription,
-            )
-            session.add(entry)
+            # Reuse an existing Entry (e.g. after a reset or a queue-vs-manual
+            # race) instead of inserting a second row for the same file.
+            existing = session.exec(
+                select(Entry).where(Entry.file_id == file_id)
+            ).first()
+            if existing is not None:
+                existing.language = language
+                existing.transcription = transcription
+                session.add(existing)
+            else:
+                session.add(
+                    Entry(
+                        file_id=file_id,
+                        language=language,
+                        transcription=transcription,
+                    )
+                )
             session.commit()
         with get_session() as session:
             db_record = session.get(FileRecord, file_id)
@@ -105,7 +145,7 @@ async def run_translation(file_id: UUID) -> Optional[str]:
         return None
 
     try:
-        # TODO: Check token count > 4096 here before translation
+        # Oversized inputs are capped by llm._guard_text (LLM_MAX_INPUT_CHARS).
         translation = await llm.translate(transcription, language)
         with get_session() as session:
             e = session.get(Entry, entry_id)
@@ -151,7 +191,7 @@ async def run_summarization(file_id: UUID) -> Optional[str]:
         return None
 
     try:
-        # TODO: Check token count > 4096 here before summarization
+        # Oversized inputs are capped by llm._guard_text (LLM_MAX_INPUT_CHARS).
         text = translation or transcription
         summary = await llm.summarize(text)
         with get_session() as session:
@@ -295,104 +335,89 @@ async def process_pending_files(emit_sse: bool = False) -> dict:
         total,
     )
 
-    succeeded = 0
-    failed = 0
     errors: list = []
     attempted_ids: set[UUID] = set()
+    # A file can pass through several stages in one run; count each file at most
+    # once. It is "failed" if any stage errored, otherwise "succeeded". This keeps
+    # the UI numbers consistent (succeeded + failed == attempted).
+    failed_ids: set[UUID] = set()
 
-    for fid in pending_ids:
-        attempted_ids.add(fid)
-        sse_emit(fid, {"stage": "transcribe", "status": "start"})
-        error = await run_transcription(fid)
-        if error:
-            sse_emit(fid, {"stage": "transcribe", "status": "failed", "error": error})
-            errors.append({"filename": str(fid), "error": error})
-            failed += 1
-        else:
-            sse_emit(fid, {"stage": "transcribe", "status": "done"})
-            succeeded += 1
+    from app import queue as _queue_module
 
-    with get_session() as session:
-        transcribed = session.exec(
-            select(FileRecord).where(FileRecord.status == "transcribed")
-        ).all()
-        transcribed_ids = [r.id for r in transcribed]
+    async def _run_stage(stage_name, ids, runner, final=False):
+        for fid in ids:
+            attempted_ids.add(fid)
+            _queue_module.set_current_file(fid)
+            sse_emit(fid, {"stage": stage_name, "status": "start"})
+            error = await runner(fid)
+            if error:
+                filename = _get_filename(fid)
+                sse_emit(
+                    fid,
+                    {"stage": stage_name, "status": "failed", "error": error, "filename": filename},
+                )
+                errors.append({"filename": filename, "error": error})
+                failed_ids.add(fid)
+            else:
+                sse_emit(fid, {"stage": stage_name, "status": "done"})
+                if final:
+                    sse_emit(fid, {"stage": "pipeline", "status": "complete"})
 
     from app.services.llm import check_llm_server_ready
 
-    llm_probe = await check_llm_server_ready("translate")
-    if llm_probe:
-        logger.warning(
-            "Translate server probe: %s — running translation for %d file(s) anyway.",
-            llm_probe,
-            len(transcribed_ids),
-        )
-    for fid in transcribed_ids:
-        attempted_ids.add(fid)
-        sse_emit(fid, {"stage": "translate", "status": "start"})
-        error = await run_translation(fid)
-        if error:
-            sse_emit(fid, {"stage": "translate", "status": "failed", "error": error})
-            errors.append({"filename": str(fid), "error": error})
-            failed += 1
-        else:
-            sse_emit(fid, {"stage": "translate", "status": "done"})
-            succeeded += 1
+    try:
+        await _run_stage("transcribe", pending_ids, run_transcription)
 
-    with get_session() as session:
-        translated = session.exec(
-            select(FileRecord).where(FileRecord.status == "translated")
-        ).all()
-        translated_ids = [r.id for r in translated]
+        with get_session() as session:
+            transcribed = session.exec(
+                select(FileRecord).where(FileRecord.status == "transcribed")
+            ).all()
+            transcribed_ids = [r.id for r in transcribed]
 
-    llm_probe = await check_llm_server_ready("summarize")
-    if llm_probe:
-        logger.warning(
-            "Summarize server probe: %s — running summarization for %d file(s) anyway.",
-            llm_probe,
-            len(translated_ids),
-        )
-    for fid in translated_ids:
-        attempted_ids.add(fid)
-        sse_emit(fid, {"stage": "summarize", "status": "start"})
-        error = await run_summarization(fid)
-        if error:
-            sse_emit(fid, {"stage": "summarize", "status": "failed", "error": error})
-            errors.append({"filename": str(fid), "error": error})
-            failed += 1
-        else:
-            sse_emit(fid, {"stage": "summarize", "status": "done"})
-            succeeded += 1
+        llm_probe = await check_llm_server_ready("translate")
+        if llm_probe:
+            logger.warning(
+                "Translate server probe: %s — running translation for %d file(s) anyway.",
+                llm_probe,
+                len(transcribed_ids),
+            )
+        await _run_stage("translate", transcribed_ids, run_translation)
 
-    with get_session() as session:
-        summarized = session.exec(
-            select(FileRecord).where(FileRecord.status == "summarized")
-        ).all()
-        summarized_ids = [r.id for r in summarized]
+        with get_session() as session:
+            translated = session.exec(
+                select(FileRecord).where(FileRecord.status == "translated")
+            ).all()
+            translated_ids = [r.id for r in translated]
 
-    llm_probe = await check_llm_server_ready("extract")
-    if llm_probe:
-        logger.warning(
-            "Extract server probe: %s — running extraction/finalize for %d file(s) anyway.",
-            llm_probe,
-            len(summarized_ids),
-        )
-    for fid in summarized_ids:
-        attempted_ids.add(fid)
-        sse_emit(fid, {"stage": "extract", "status": "start"})
-        error = await run_extraction_and_finalize(fid)
-        if error:
-            sse_emit(fid, {"stage": "extract", "status": "failed", "error": error})
-            errors.append({"filename": str(fid), "error": error})
-            failed += 1
-        else:
-            sse_emit(fid, {"stage": "extract", "status": "done"})
-            sse_emit(fid, {"stage": "pipeline", "status": "complete"})
-            succeeded += 1
+        llm_probe = await check_llm_server_ready("summarize")
+        if llm_probe:
+            logger.warning(
+                "Summarize server probe: %s — running summarization for %d file(s) anyway.",
+                llm_probe,
+                len(translated_ids),
+            )
+        await _run_stage("summarize", translated_ids, run_summarization)
+
+        with get_session() as session:
+            summarized = session.exec(
+                select(FileRecord).where(FileRecord.status == "summarized")
+            ).all()
+            summarized_ids = [r.id for r in summarized]
+
+        llm_probe = await check_llm_server_ready("extract")
+        if llm_probe:
+            logger.warning(
+                "Extract server probe: %s — running extraction/finalize for %d file(s) anyway.",
+                llm_probe,
+                len(summarized_ids),
+            )
+        await _run_stage("extract", summarized_ids, run_extraction_and_finalize, final=True)
+    finally:
+        _queue_module.set_current_file(None)
 
     return {
         "attempted": len(attempted_ids),
-        "succeeded": succeeded,
-        "failed": failed,
+        "succeeded": len(attempted_ids - failed_ids),
+        "failed": len(failed_ids),
         "errors": errors,
     }

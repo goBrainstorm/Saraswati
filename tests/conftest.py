@@ -6,7 +6,6 @@ from main import app as fastapi_app
 from app.database import get_session
 import app.database as app_db
 import tempfile
-import os
 from pathlib import Path
 
 @pytest_asyncio.fixture

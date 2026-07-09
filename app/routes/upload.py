@@ -1,5 +1,6 @@
 import hashlib
 import logging
+import uuid as _uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated, Optional
@@ -92,8 +93,7 @@ async def upload_file(
         # Sanitise: strip path separators from client-supplied name
         safe_name = Path(original_name).name
 
-        # Temporary UUID for the filename — will match the DB record id
-        import uuid as _uuid
+        # Filename UUID matches the DB record id.
         record_id = _uuid.uuid4()
         dest_filename = f"{record_id}_{safe_name}"
         dest_path = input_dir / dest_filename
@@ -103,11 +103,11 @@ async def upload_file(
         if source_modified_at is None:
             source_modified_at = read_embedded_recording_datetime_from_bytes(raw, safe_name)
 
-        dest_path.write_bytes(raw)
-        logger.info("Saved upload '%s' to '%s'.", original_name, dest_path)
-
         now = datetime.now(timezone.utc)
 
+        # Commit the DB record before writing the file, then write the bytes. If
+        # the write fails we roll the record back, so we never leave an orphaned
+        # file with no record (and never a committed record without its file).
         record = FileRecord(
             id=record_id,
             filename=safe_name,
@@ -121,6 +121,15 @@ async def upload_file(
         session.commit()
         session.refresh(record)
 
+        try:
+            dest_path.write_bytes(raw)
+        except Exception:
+            logger.exception("Failed to write upload '%s' to '%s'; rolling back record.", original_name, dest_path)
+            session.delete(record)
+            session.commit()
+            raise HTTPException(status_code=500, detail="Failed to persist uploaded file.")
+
+        logger.info("Saved upload '%s' to '%s'.", original_name, dest_path)
         logger.info("Created FileRecord id=%s for '%s'.", record.id, original_name)
         _queue_module.enqueue(record.id)
         return record

@@ -5,6 +5,7 @@ import pytest
 
 from app.models import ModelConfig
 from app.services.llm import (
+    _chat,
     _guard_text,
     _MAX_CHARS,
     check_llm_server_ready,
@@ -12,6 +13,53 @@ from app.services.llm import (
     summarize,
     translate,
 )
+
+
+def _mock_chat_response(json_value):
+    mock_resp = MagicMock()
+    mock_resp.raise_for_status = MagicMock()
+    mock_resp.json = MagicMock(return_value=json_value)
+    mock_instance = AsyncMock()
+    mock_instance.post = AsyncMock(return_value=mock_resp)
+    return mock_instance
+
+
+@pytest.mark.asyncio
+async def test_chat_returns_content_on_valid_shape():
+    mock_instance = _mock_chat_response(
+        {"choices": [{"message": {"content": "  hi there  "}}]}
+    )
+    with patch("app.services.llm.httpx.AsyncClient") as mock_cls:
+        mock_cls.return_value.__aenter__.return_value = mock_instance
+        result = await _chat([{"role": "user", "content": "x"}])
+    assert result == "hi there"
+
+
+@pytest.mark.asyncio
+async def test_chat_raises_on_error_json():
+    mock_instance = _mock_chat_response({"error": {"message": "boom"}})
+    with patch("app.services.llm.httpx.AsyncClient") as mock_cls:
+        mock_cls.return_value.__aenter__.return_value = mock_instance
+        with pytest.raises(RuntimeError, match="Unexpected LLM response shape"):
+            await _chat([{"role": "user", "content": "x"}])
+
+
+@pytest.mark.asyncio
+async def test_chat_raises_on_empty_choices():
+    mock_instance = _mock_chat_response({"choices": []})
+    with patch("app.services.llm.httpx.AsyncClient") as mock_cls:
+        mock_cls.return_value.__aenter__.return_value = mock_instance
+        with pytest.raises(RuntimeError, match="Unexpected LLM response shape"):
+            await _chat([{"role": "user", "content": "x"}])
+
+
+@pytest.mark.asyncio
+async def test_chat_raises_when_content_not_string():
+    mock_instance = _mock_chat_response({"choices": [{"message": {"content": None}}]})
+    with patch("app.services.llm.httpx.AsyncClient") as mock_cls:
+        mock_cls.return_value.__aenter__.return_value = mock_instance
+        with pytest.raises(RuntimeError, match="content"):
+            await _chat([{"role": "user", "content": "x"}])
 
 
 async def test_translate_skips_english():

@@ -29,7 +29,9 @@ async def trigger_process_single(file_id: UUID) -> Dict[str, Any]:
 
     with get_session() as session:
         status = session.get(FileRecord, file_id).status
-    if status == "pending":
+    # "processing" means a prior run was interrupted; run_transcription accepts it
+    # and resumes, so treat it like "pending" here to allow a manual retry.
+    if status in ("pending", "processing"):
         err = await run_transcription(file_id)
         if err:
             raise HTTPException(status_code=500, detail=err)
@@ -62,8 +64,9 @@ async def trigger_process_single(file_id: UUID) -> Dict[str, Any]:
 async def trigger_process() -> Dict[str, Any]:
     """Manually trigger the processing pipeline.
 
-    Phase 1 stub: logs the trigger and returns a confirmation.
-    Phase 2 will wire Whisper transcription and LLM summarisation here.
+    Runs the full horizontal batch (Whisper transcription plus LLM
+    translate/summarize/extract) over all eligible files, then refreshes the
+    recent-entries cache. Returns per-run counts and any per-file errors.
     """
     from app.services.pipeline import process_pending_files
     from app.services.cache import write_recent_cache

@@ -46,6 +46,13 @@ Thumbs.db
 *.log
 tmp/
 
+# Test artifacts
+pytest-of-brain/
+.pytest_cache/
+
+# Superpowers / brainstorming runtime state
+.superpowers/
+
 # Runtime data (generated at startup)
 data/
 cache/
